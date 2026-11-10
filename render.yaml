@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: wizards-fight
+    runtime: node
+    plan: free
+    buildCommand: npm ci --include=dev && npm run build
+    startCommand: npx tsx server.ts
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: "10000"
