@@ -1,12 +1,10 @@
 'use client';
 
 import { useState, useCallback } from 'react';
-import { useRouter } from 'next/navigation';
 import { io, Socket } from 'socket.io-client';
 
 export default function LandingPage() {
   const [loading, setLoading] = useState(false);
-  const router = useRouter();
 
   const startFight = useCallback(() => {
     setLoading(true);
@@ -15,14 +13,14 @@ export default function LandingPage() {
     socket.on('connect', () => {
       socket.emit('room:create', (result: { roomId: string }) => {
         socket.disconnect();
-        router.push(`/battle/${result.roomId}`);
+        window.location.href = `/battle/${result.roomId}`;
       });
     });
 
     socket.on('connect_error', () => {
       setLoading(false);
     });
-  }, [router]);
+  }, []);
 
   return (
     <main className="flex-1 flex flex-col items-center justify-center hero-section px-4">
