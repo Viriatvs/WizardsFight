@@ -1,13 +1,13 @@
 'use client';
 
-import { useState, useCallback, useEffect, useRef, use } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { io, Socket } from 'socket.io-client';
 import Countdown from '@/components/Countdown';
 import SpellInput from '@/components/SpellInput';
 import type { PlayerColor, GamePhase, SpellData } from '@/types/game';
 
-export default function PlayPage({ params }: { params: Promise<{ room: string }> }) {
-  const { room: roomId } = use(params);
+export default function PlayPage({ params }: { params: { room: string } }) {
+  const roomId = params.room;
   const socketRef = useRef<Socket | null>(null);
 
   const [phase, setPhase] = useState<GamePhase>('connecting');

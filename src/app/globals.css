@@ -1,15 +1,10 @@
-@import "tailwindcss";
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
 
 :root {
   --background: #0a0a1a;
   --foreground: #e8e8e8;
-}
-
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
 }
 
 body {
@@ -56,6 +51,13 @@ body {
   30%, 70% { transform: translateX(4px); }
 }
 
+@keyframes battle-text-anim {
+  0% { transform: scale(0.3); opacity: 0; letter-spacing: 0.3em; }
+  40% { transform: scale(1.2); opacity: 1; letter-spacing: 0.1em; }
+  60% { transform: scale(1); letter-spacing: 0.15em; }
+  100% { transform: scale(1); opacity: 1; letter-spacing: 0.15em; }
+}
+
 .animate-countdown {
   animation: countdown-in 0.9s ease-out forwards;
 }
@@ -80,6 +82,10 @@ body {
   animation: victory-pulse 1.5s ease-in-out infinite;
 }
 
+.battle-text {
+  animation: battle-text-anim 0.8s ease-out forwards;
+}
+
 .confetti-piece {
   animation: confetti-burst 1.2s ease-out forwards;
   animation-delay: var(--delay);
@@ -94,17 +100,6 @@ body {
   position: absolute;
   bottom: 0;
   left: 50%;
-}
-
-@keyframes battle-text-anim {
-  0% { transform: scale(0.3); opacity: 0; letter-spacing: 0.3em; }
-  40% { transform: scale(1.2); opacity: 1; letter-spacing: 0.1em; }
-  60% { transform: scale(1); letter-spacing: 0.15em; }
-  100% { transform: scale(1); opacity: 1; letter-spacing: 0.15em; }
-}
-
-.battle-text {
-  animation: battle-text-anim 0.8s ease-out forwards;
 }
 
 .hero-section {
