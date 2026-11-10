@@ -1,0 +1,132 @@
+@import "tailwindcss";
+
+:root {
+  --background: #0a0a1a;
+  --foreground: #e8e8e8;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: Arial, Helvetica, sans-serif;
+}
+
+@keyframes countdown-in {
+  0% { transform: scale(2); opacity: 0; }
+  30% { transform: scale(1); opacity: 1; }
+  80% { transform: scale(1); opacity: 1; }
+  100% { transform: scale(0.5); opacity: 0; }
+}
+
+@keyframes fade-in {
+  from { opacity: 0; transform: translateY(20px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes spell-glow-anim {
+  0%, 100% { text-shadow: 0 0 10px rgba(245,158,11,0.4), 0 0 20px rgba(245,158,11,0.2); }
+  50% { text-shadow: 0 0 20px rgba(245,158,11,0.8), 0 0 40px rgba(245,158,11,0.4); }
+}
+
+@keyframes victory-pulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.05); }
+}
+
+@keyframes confetti-burst {
+  0% { transform: translate(0, 0) scale(1); opacity: 1; }
+  100% { transform: translate(var(--x), -120px) scale(0); opacity: 0; }
+}
+
+@keyframes float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-8px); }
+}
+
+@keyframes shake {
+  0%, 100% { transform: translateX(0); }
+  10%, 50%, 90% { transform: translateX(-4px); }
+  30%, 70% { transform: translateX(4px); }
+}
+
+.animate-countdown {
+  animation: countdown-in 0.9s ease-out forwards;
+}
+
+.animate-fade-in {
+  animation: fade-in 0.5s ease-out forwards;
+}
+
+.animate-victory-pulse {
+  animation: victory-pulse 1.5s ease-in-out infinite;
+}
+
+.animate-shake {
+  animation: shake 0.5s ease-in-out;
+}
+
+.spell-glow {
+  animation: spell-glow-anim 2s ease-in-out infinite;
+}
+
+.victory-text {
+  animation: victory-pulse 1.5s ease-in-out infinite;
+}
+
+.confetti-piece {
+  animation: confetti-burst 1.2s ease-out forwards;
+  animation-delay: var(--delay);
+  opacity: 0;
+}
+
+.confetti-container {
+  position: relative;
+}
+
+.confetti-container .confetti-piece {
+  position: absolute;
+  bottom: 0;
+  left: 50%;
+}
+
+@keyframes battle-text-anim {
+  0% { transform: scale(0.3); opacity: 0; letter-spacing: 0.3em; }
+  40% { transform: scale(1.2); opacity: 1; letter-spacing: 0.1em; }
+  60% { transform: scale(1); letter-spacing: 0.15em; }
+  100% { transform: scale(1); opacity: 1; letter-spacing: 0.15em; }
+}
+
+.battle-text {
+  animation: battle-text-anim 0.8s ease-out forwards;
+}
+
+.hero-section {
+  position: relative;
+  overflow: hidden;
+}
+
+.hero-section::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(ellipse at 50% 30%, rgba(120, 80, 255, 0.15), transparent 70%);
+  pointer-events: none;
+}
+
+.btn-fight {
+  background: linear-gradient(135deg, #d97706, #dc2626);
+  transition: all 0.3s ease;
+}
+
+.btn-fight:hover {
+  background: linear-gradient(135deg, #f59e0b, #ef4444);
+  transform: translateY(-2px);
+  box-shadow: 0 10px 40px rgba(220, 38, 38, 0.3);
+}

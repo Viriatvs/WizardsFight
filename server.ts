@@ -1,0 +1,237 @@
+import http from 'http';
+import next from 'next';
+import { Server, Socket } from 'socket.io';
+import { createRoom, getRoom, deleteRoom } from './src/lib/rooms';
+import { randomSpell } from './src/lib/spells';
+import { validateSubmission, determineWinner } from './src/lib/scoring';
+import type { Room, PlayerColor, Submission } from './src/types/game';
+
+const dev = process.env.NODE_ENV !== 'production';
+const port = parseInt(process.env.PORT || '3000', 10);
+
+const app = next({ dev });
+const handle = app.getRequestHandler();
+
+function roomToPayload(room: Room) {
+  const players: Array<{ color: string; name: string; socketId: string }> = [];
+  for (const player of room.players.values()) {
+    players.push({ color: player.color, name: player.name, socketId: player.socketId });
+  }
+  return {
+    id: room.id,
+    state: room.state,
+    players,
+    playerCount: room.players.size,
+    maxPlayers: room.maxPlayers,
+    spell: room.state === 'playing' ? room.spell : undefined,
+    spellRevealedAt: room.spellRevealedAt,
+    startedAt: room.startedAt,
+  };
+}
+
+function startBattle(io: Server, room: Room) {
+  if (room.state !== 'waiting' || room.players.size < room.maxPlayers) return;
+
+  room.state = 'countdown';
+  room.startedAt = Date.now();
+  io.to(room.id).emit('room:update', roomToPayload(room));
+
+  const prevLatin = room.spell && room.spell.latin ? room.spell.latin : undefined;
+  const spell = randomSpell(prevLatin);
+  room.spell = spell;
+
+  const sequence = [3, 2, 1];
+  let step = 0;
+
+  const interval = setInterval(() => {
+    if (step < sequence.length) {
+      io.to(room.id).emit('countdown', { seconds: sequence[step] });
+      step++;
+    } else if (step === sequence.length) {
+      io.to(room.id).emit('fight', { text: 'FIGHT' });
+      step++;
+    } else {
+      clearInterval(interval);
+      room.state = 'playing';
+      room.spellRevealedAt = Date.now();
+      io.to(room.id).emit('room:update', roomToPayload(room));
+      io.to(room.id).emit('spell:reveal', { spell, revealedAt: room.spellRevealedAt });
+      console.log(`[room ${room.id}] spell revealed: ${spell.latin}`);
+
+      setTimeout(() => {
+        if (room.state === 'playing') {
+          room.state = 'ended';
+          const results: Record<string, { color: PlayerColor; name: string; durationMs: number; correct: boolean }> = {};
+          for (const player of room.players.values()) {
+            results[player.socketId] = { color: player.color, name: player.name, durationMs: -1, correct: false };
+          }
+          io.to(room.id).emit('battle:end', { winnerColor: null, winnerName: null, durationMs: null, results, timedOut: true });
+          console.log(`[room ${room.id}] timed out`);
+        }
+      }, 30000);
+    }
+  }, 1000);
+}
+
+app.prepare().then(() => {
+  const server = http.createServer((req, res) => {
+    handle(req, res);
+  });
+
+  const io = new Server(server, {
+    cors: { origin: '*', methods: ['GET', 'POST'] },
+    path: '/socket.io',
+  });
+
+  io.on('connection', (socket: Socket) => {
+    console.log(`[socket] connected: ${socket.id}`);
+
+    socket.on('room:create', (cb?: (result: { roomId: string }) => void) => {
+      const room = createRoom(socket.id);
+      if (cb) cb({ roomId: room.id });
+    });
+
+    socket.on('room:watch', (payload: { roomId: string }, cb?: (result: { success: boolean; data?: ReturnType<typeof roomToPayload>; error?: string }) => void) => {
+      const room = getRoom(payload.roomId);
+      if (!room) {
+        if (cb) cb({ success: false, error: 'Room not found' });
+        return;
+      }
+      room.hostSocketId = socket.id;
+      socket.data.roomId = room.id;
+      socket.data.role = 'host';
+      socket.join(room.id);
+      if (cb) cb({ success: true, data: roomToPayload(room) });
+    });
+
+    socket.on('room:join', (payload: { roomId: string; name?: string }, cb?: (result: { success: boolean; color?: PlayerColor; error?: string }) => void) => {
+      const room = getRoom(payload.roomId);
+      if (!room) {
+        if (cb) cb({ success: false, error: 'Room not found' });
+        return;
+      }
+      if (room.state !== 'waiting') {
+        if (cb) cb({ success: false, error: 'Battle already started' });
+        return;
+      }
+      if (room.players.size >= room.maxPlayers) {
+        if (cb) cb({ success: false, error: 'Room is full (max 2 players)' });
+        return;
+      }
+
+      const colors: PlayerColor[] = ['blue', 'red'];
+      const usedColors = new Set(room.players.values().map((p) => p.color));
+      const color = colors.find((c) => !usedColors.has(c))!;
+      const name = payload.name?.trim() || (color === 'blue' ? 'Blue Wizard' : 'Red Wizard');
+
+      const player = { socketId: socket.id, color, name, joinedAt: Date.now() };
+      room.players.set(socket.id, player);
+      socket.data.roomId = room.id;
+      socket.data.role = 'player';
+      socket.join(room.id);
+
+      if (cb) cb({ success: true, color });
+
+      io.to(room.id).emit('room:update', roomToPayload(room));
+      console.log(`[room ${room.id}] ${color} joined: ${socket.id}`);
+
+      if (room.players.size >= room.maxPlayers) {
+        console.log(`[room ${room.id}] both ready — auto-starting in 2s`);
+        setTimeout(() => {
+          const r = getRoom(room.id);
+          if (r && r.state === 'waiting') startBattle(io, r);
+        }, 2000);
+      }
+    });
+
+    socket.on('spell:submit', (payload: { roomId: string; text: string }) => {
+      const room = getRoom(payload.roomId);
+      if (!room || room.state !== 'playing' || !room.spellRevealedAt) return;
+      if (room.submissions.has(socket.id)) return;
+
+      const submittedAt = Date.now();
+      const durationMs = submittedAt - room.spellRevealedAt;
+      const correct = validateSubmission(payload.text, room.spell);
+
+      const submission: Submission = {
+        socketId: socket.id,
+        text: payload.text,
+        submittedAt,
+        spellRevealedAt: room.spellRevealedAt,
+        durationMs,
+        correct,
+        valid: true,
+      };
+
+      room.submissions.set(socket.id, submission);
+      const player = room.players.get(socket.id);
+      console.log(`[room ${room.id}] ${player?.color} submitted: correct=${correct} duration=${durationMs}ms`);
+
+      io.to(socket.id).emit('spell:submitted', {
+        correct,
+        durationMs,
+        expected: room.spell.latin,
+        submitted: payload.text,
+      });
+
+      if (room.submissions.size >= room.maxPlayers) {
+        room.state = 'ended';
+        const result = determineWinner(room.submissions, room.players);
+        io.to(room.id).emit('battle:end', {
+          winnerColor: result.winnerColor,
+          winnerName: result.winnerName,
+          durationMs: result.durationMs,
+          results: Object.fromEntries(result.results),
+        });
+        console.log(`[room ${room.id}] battle ended, winner: ${result.winnerColor}`);
+      }
+    });
+
+    socket.on('disconnect', () => {
+      const data = socket.data as { roomId?: string; role?: string };
+      if (data?.roomId) {
+        const room = getRoom(data.roomId);
+        if (room) {
+          if (data.role === 'player') {
+            const player = room.players.get(socket.id);
+            if (player) {
+              console.log(`[room ${room.id}] ${player.color} disconnected: ${socket.id}`);
+              io.to(room.id).emit('player:disconnected', { color: player.color, name: player.name });
+
+              if (room.state === 'playing') {
+                room.state = 'ended';
+                const others = Array.from(room.players.values()).filter((p) => p.socketId !== socket.id);
+                if (others.length > 0) {
+                  const winner = others[0];
+                  const results: Record<string, { color: PlayerColor; name: string; durationMs: number; correct: boolean }> = {
+                    [winner.socketId]: { color: winner.color, name: winner.name, durationMs: 0, correct: true },
+                  };
+                  io.to(room.id).emit('battle:end', { winnerColor: winner.color, winnerName: winner.name, durationMs: null, results });
+                } else {
+                  io.to(room.id).emit('battle:end', { winnerColor: null, winnerName: null, durationMs: null, results: {} });
+                }
+              }
+            }
+            room.players.delete(socket.id);
+          }
+
+          io.to(room.id).emit('room:update', roomToPayload(room));
+
+          if (room.players.size === 0 && room.hostSocketId !== socket.id) {
+            setTimeout(() => {
+              const r = getRoom(room.id);
+              if (r && r.players.size === 0) {
+                deleteRoom(room.id);
+                console.log(`[room ${room.id}] deleted (empty)`);
+              }
+            }, 10000);
+          }
+        }
+      }
+    });
+  });
+
+  server.listen(port, () => {
+    console.log(`Wizards Fight running on http://localhost:${port}`);
+  });
+});
