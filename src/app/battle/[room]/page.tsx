@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, use } from 'react';
 import { io, Socket } from 'socket.io-client';
 import QRPanel from '@/components/QRPanel';
 import PlayerCard from '@/components/PlayerCard';
@@ -25,8 +25,8 @@ interface BattleEndData {
   timedOut?: boolean;
 }
 
-export default function BattlePage({ params }: { params: { room: string } }) {
-  const roomId = params.room;
+export default function BattlePage({ params }: { params: Promise<{ room: string }> }) {
+  const { room: roomId } = use(params);
   const socketRef = useRef<Socket | null>(null);
   const [room, setRoom] = useState<RoomData | null>(null);
   const [countdown, setCountdown] = useState<number | null>(null);
