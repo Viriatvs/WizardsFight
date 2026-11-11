@@ -62,6 +62,49 @@ export function maskSpell(latin: string): string {
   return latin.replace(/\S/g, '_');
 }
 
+/** Hangman start: every word's first letter visible, the rest hidden. */
+export function hangmanStart(latin: string): string {
+  return latin.replace(/\S+/g, (word) => word[0] + '_'.repeat(word.length - 1));
+}
+
+/** Hangman step: the leftmost word whose last letter is still hidden gets it; once all are shown, a random letter. */
+export function hangmanNextLetter(latin: string, masked: string, rand: Rand = Math.random): string {
+  for (const m of latin.matchAll(/\S+/g)) {
+    const last = m.index! + m[0].length - 1;
+    if (masked[last] === '_') return masked.slice(0, last) + latin[last] + masked.slice(last + 1);
+  }
+  return revealRandomLetter(latin, masked, rand);
+}
+
+const words = (text: string) => text.toLowerCase().split(/\s+/).filter(Boolean);
+
+/**
+ * Memorize: indices of spell words the player has found, after adding `guess`.
+ * A word counts wherever it is in the spell (any position), ignoring case; repeated words are all found.
+ */
+export function matchWords(latin: string, guess: string, found: number[] = []): number[] {
+  const guessed = new Set(words(guess));
+  const next = new Set(found);
+  words(latin).forEach((w, i) => { if (guessed.has(w)) next.add(i); });
+  return [...next].sort((a, b) => a - b);
+}
+
+/** Memorize: the spell with found words shown and the others as underscores. */
+export function maskWords(latin: string, found: number[]): string {
+  const shown = new Set(found);
+  return latin.trim().split(/\s+/).map((w, i) => (shown.has(i) ? w : '_'.repeat(w.length))).join(' ');
+}
+
+/** Memorize: how many letters the found words add up to (the tie-breaker at the time limit). */
+export function lettersFound(latin: string, found: number[]): number {
+  const all = latin.trim().split(/\s+/);
+  return found.reduce((sum, i) => sum + (all[i]?.length ?? 0), 0);
+}
+
+export function spellWordCount(latin: string): number {
+  return words(latin).length;
+}
+
 /** Uncovers one random hidden position of `masked`. Returns it unchanged when nothing is hidden. */
 export function revealRandomLetter(latin: string, masked: string, rand: Rand = Math.random): string {
   const hidden = [...masked].flatMap((c, i) => (c === '_' ? [i] : []));

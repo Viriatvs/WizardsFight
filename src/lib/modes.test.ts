@@ -1,6 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { MODES, randomMode, buildChoices, maskSpell, revealRandomLetter, CHOICE_COUNT, scramblePuzzle, isSolved } from './modes';
+import {
+  MODES, randomMode, buildChoices, maskSpell, revealRandomLetter, CHOICE_COUNT, scramblePuzzle, isSolved,
+  hangmanStart, hangmanNextLetter, matchWords, maskWords, lettersFound, spellWordCount,
+} from './modes';
 import type { SpellData } from '@/types/game';
 
 const spell = (latin: string, english: string, description = `${english}.`): SpellData => ({ latin, english, description, category: 'Test' });
@@ -62,4 +65,35 @@ test('isSolved accepts only the complete, in-order picture', () => {
   assert.equal(isSolved(solved), true);
   assert.equal(isSolved([1, 0, ...solved.slice(2)]), false);
   assert.equal(isSolved(solved.slice(0, 11)), false);
+});
+
+test('hangman starts with first letters, then reveals last letters left to right, then random ones', () => {
+  const latin = 'Ignis Aeternus Devora';
+  let masked = hangmanStart(latin);
+  assert.equal(masked, 'I____ A_______ D_____');
+  masked = hangmanNextLetter(latin, masked);
+  assert.equal(masked, 'I___s A_______ D_____');
+  masked = hangmanNextLetter(latin, masked);
+  masked = hangmanNextLetter(latin, masked);
+  assert.equal(masked, 'I___s A______s D____a');
+  const before = masked;
+  masked = hangmanNextLetter(latin, masked); // now random: exactly one more letter
+  assert.equal([...masked].filter((c, i) => c !== before[i]).length, 1);
+  while (masked.includes('_')) masked = hangmanNextLetter(latin, masked);
+  assert.equal(masked, latin);
+  assert.equal(hangmanStart('A Lux'), 'A L__'); // one-letter words are fully shown
+});
+
+test('memorize: words count in any position, ignoring case, and add up letters', () => {
+  const spell = 'abutres vao cair logo';
+  let found = matchWords(spell, 'abutres vio fell');
+  assert.deepEqual(found, [0]);
+  assert.equal(maskWords(spell, found), 'abutres ___ ____ ____');
+  found = matchWords(spell, 'LOGO', found);
+  assert.equal(maskWords(spell, found), 'abutres ___ ____ logo');
+  assert.equal(lettersFound(spell, found), 11);
+  found = matchWords(spell, 'cair vao', found);
+  assert.equal(found.length, spellWordCount(spell));
+  assert.equal(maskWords(spell, found), spell);
+  assert.deepEqual(matchWords('Vita Tua Mea Vita', 'vita'), [0, 3]); // repeated words both found
 });

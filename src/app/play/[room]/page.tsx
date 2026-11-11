@@ -15,17 +15,28 @@ import type { PlayerColor, GamePhase, BattleMode, SpellReveal, GameInfo, BattleE
 /** Where to send visitors of a room that no longer exists. The start page shows a notice for it. */
 const ROOM_EXPIRED_URL = '/?expired=1';
 
+/** Memorize: this player's found words, from spell:progress. */
+interface MemorizeProgress { masked: string; found: number; total: number }
+
 /** What SpellInput shows for the typing modes; null for the choice modes. */
-function typingDisplay(reveal: SpellReveal, memorizeHidden: boolean) {
+function typingDisplay(reveal: SpellReveal, memorizeHidden: boolean, progress: MemorizeProgress | null) {
   switch (reveal.mode) {
     case 'type':
       return { category: reveal.spell.category, text: reveal.spell.latin, english: reveal.spell.english, description: reveal.spell.description };
     case 'hangman':
       return { category: reveal.category, text: reveal.masked, slots: true, english: reveal.english };
     case 'memorize':
-      return memorizeHidden
-        ? { category: reveal.category, text: reveal.masked, slots: true, english: reveal.english }
-        : { category: reveal.category, text: reveal.latin, english: reveal.english, notice: 'Memorize it', inputVisible: false };
+      if (!memorizeHidden) {
+        return { category: reveal.category, text: reveal.latin, english: reveal.english, notice: 'Memorize it', inputVisible: false };
+      }
+      return {
+        category: reveal.category,
+        text: progress?.masked ?? reveal.masked,
+        slots: true,
+        english: reveal.english,
+        description: `${progress?.found ?? 0} of ${progress?.total ?? reveal.latin.split(' ').length} words found. Type any words you remember.`,
+        resetInputKey: progress?.found ?? 0,
+      };
     default:
       return null;
   }
@@ -59,6 +70,7 @@ export default function PlayPage({ params }: { params: Promise<{ room: string }>
   /** Local timestamp when the round ends in a draw, when the server told us. */
   const [deadline, setDeadline] = useState<number | null>(null);
   const [memorizeHidden, setMemorizeHidden] = useState(false);
+  const [memorizeProgress, setMemorizeProgress] = useState<MemorizeProgress | null>(null);
   const [submitted, setSubmitted] = useState<{ correct: boolean; durationMs: number } | null>(null);
   const [graceSeconds, setGraceSeconds] = useState<number | null>(null);
   const graceTimerRef = useRef<ReturnType<typeof setInterval>>();
@@ -91,6 +103,7 @@ export default function PlayPage({ params }: { params: Promise<{ room: string }>
         setReveal(null);
         setDeadline(null);
         setMemorizeHidden(false);
+        setMemorizeProgress(null);
         setGraceSeconds(null);
         setBattleEnd(null);
       }
@@ -120,6 +133,7 @@ export default function PlayPage({ params }: { params: Promise<{ room: string }>
       setCountdown(null);
       setReveal(data);
       setMemorizeHidden(false);
+      setMemorizeProgress(null);
       setDeadline('limitMs' in data ? Date.now() + data.limitMs : null);
       setPhase('spell');
     });
@@ -135,6 +149,9 @@ export default function PlayPage({ params }: { params: Promise<{ room: string }>
       setMemorizeHidden(true);
       setDeadline(Date.now() + data.limitMs);
     });
+
+    // Memorize: some typed words were right; only this player sees them.
+    socket.on('spell:progress', (data: MemorizeProgress) => setMemorizeProgress(data));
 
     socket.on('spell:submitted', (data: { correct: boolean; durationMs: number; lockedOut?: boolean }) => {
       if (!data.correct) {
@@ -359,9 +376,9 @@ export default function PlayPage({ params }: { params: Promise<{ room: string }>
           />
         )}
 
-        {phase === 'spell' && reveal && typingDisplay(reveal, memorizeHidden) && (
+        {phase === 'spell' && reveal && typingDisplay(reveal, memorizeHidden, memorizeProgress) && (
           <SpellInput
-            {...typingDisplay(reveal, memorizeHidden)!}
+            {...typingDisplay(reveal, memorizeHidden, memorizeProgress)!}
             deadline={deadline}
             spellRevealedAt={reveal.revealedAt}
             onSubmit={submitSpell}

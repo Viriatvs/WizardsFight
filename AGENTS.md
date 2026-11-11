@@ -67,7 +67,8 @@ src/
   lib/spells.ts            Server-only: parses /spells.md at startup + randomSpell(excludeLatin)
   lib/scoring.ts           normalizeSpell, validateSubmission, determineWinner
   lib/modes.ts             Battle modes: MODES, MODE_LABELS, randomMode, buildChoices, maskSpell, revealRandomLetter,
-                           PUZZLE, scramblePuzzle, isSolved (pure, shared)
+                           PUZZLE, scramblePuzzle, isSolved, hangmanStart, hangmanNextLetter,
+                           matchWords, maskWords, lettersFound, spellWordCount (pure, shared)
   lib/modes.test.ts        Unit tests for modes.ts
   app/layout.tsx           Root layout (dark background)
   app/page.tsx             Landing page: "Start Fight" creates a room, then goes to /battle/:id
@@ -140,9 +141,9 @@ Time is always measured on the server: `durationMs = serverNow - spellRevealedAt
 | `type` | Speed Cast | `{spell, revealedAt}` | `SpellInput`: Latin, English, description | Type it; unlimited retries | Both correct → fastest wins. One correct → `grace {seconds:3}`, then they win (`graceTimeout`). Draw after 30 s (`timedOut`). |
 | `translate` | Translate | `{latin, category, options[4], revealedAt, limitMs}` | `ChoiceInput`: Latin + 4 English translations | **One pick.** A wrong pick puts you in `lockedOut` for the round. | First correct pick wins. All players wrong → draw (`allWrong`). Draw after 15 s (`timedOut`). |
 | `describe` | Describe | Same as translate | `ChoiceInput`: Latin + 4 descriptions | Same as translate | Same as translate |
-| `hangman` | Hangman | `{masked, english, category, revealedAt}` | `SpellInput` with letter slots + English hint | Type it; unlimited retries | The server sends `spell:hint {masked}` every 1 s, uncovering one random letter. With the last letter it adds `limitMs: 40000`. First correct wins. Draw 40 s after the last letter (`timedOut`, `HANGMAN_AFTER_FULL_MS`). |
+| `hangman` | Hangman | `{masked, english, category, revealedAt}`. `masked` starts with every word's first letter visible (`hangmanStart`). | `SpellInput` with letter slots + English hint | Type it; unlimited retries | Every 1 s the server sends `spell:hint {masked}` with one more letter (`hangmanNextLetter`): first each word's last letter, left to right, then random letters. With the last letter it adds `limitMs: 40000`. First correct wins. Draw 40 s after the last letter (`timedOut`, `HANGMAN_AFTER_FULL_MS`). |
 | `puzzle` | Puzzle | `{image, cols:3, rows:4, order[12], revealedAt, limitMs}` (same scramble for both, never pre-solved) | `PuzzleInput`: 12 tile buttons, each showing its part of `/images/puzzle-red-wizard.webp` via CSS `background-position`. Tap two tiles to swap; no preview. | When the picture is complete the phone sends its order as `"0,1,…,11"`; the server checks `isSolved` (unsolved arrangements are ignored). | First solved wins. Draw after 60 s (`PUZZLE_LIMIT_MS`, `timedOut`). |
-| `memorize` | Memorize | `{latin, masked, english, category, revealedAt, memorizeMs}` | Latin + "MEMORIZE IT" for 5 s (no input), then `spell:hide {limitMs: 10000}` → dashes + English hint + input | Type it; unlimited retries. Submits during the 5 s memorize phase are ignored. | First correct wins. Draw 10 s after hiding (`timedOut`). |
+| `memorize` | Memorize | `{latin, masked, english, category, revealedAt, memorizeMs}` | Latin + "MEMORIZE IT" for 5 s (no input), then `spell:hide {limitMs: 30000}` → dashes + English hint + "N of M words found" + input | Type any words, any number of times. Each correct word (`matchWords`: any position, case-insensitive, repeats all found) is stored in `room.memorizeFound` and revealed **for that player only** via `spell:progress {masked, found, total}`. A guess with no new word → `spell:submitted {correct:false}`. Submits during the 5 s phase are ignored. | First to find every word wins. At 30 s (`MEMORIZE_LIMIT_MS`): more correct letters (`lettersFound`) wins (`onLetters`, `results[].letters`); equal letters (incl. 0–0) is a draw (`timedOut`). |
 
 - Options in Translate/Describe: `buildChoices` takes the correct answer plus 3 different answers from other spells and shuffles them. The server checks the chosen text exactly against `spell.english` / `spell.description`.
 - Typed answers: `validateSubmission` lowercases, trims and collapses whitespace on both sides, then compares exactly.
@@ -152,7 +153,7 @@ Time is always measured on the server: `durationMs = serverNow - spellRevealedAt
 ### 6. Round end (`battle:end`)
 Every way a round ends goes through `endBattle(io, room, winner, extra)` in `server.ts`. It records the round in `roundResults` and ignores the call if the round already ended, so timers and answers can't end a round twice. Besides the mode rules above, a player who leaves while `playing` loses the round (`forfeit: true`).
 
-Payload (`BattleEnd` type): `{winnerColor, winnerName, durationMs, results: {[socketId]: {color,name,durationMs,correct}}, game: GameInfo, timedOut?, graceTimeout?, allWrong?, forfeit?}`. `durationMs` in `results` is -1 when that player has no correct answer. `results` also gives both names for the score table.
+Payload (`BattleEnd` type): `{winnerColor, winnerName, durationMs, results: {[socketId]: {color,name,durationMs,correct,letters?}}, game: GameInfo, mode, timedOut?, graceTimeout?, allWrong?, forfeit?, onLetters?}`. `durationMs` in `results` is -1 when that player has no correct answer. `results` also gives both names for the score table. Result screens use `drawReason(end)` and `winDetail(end)` (game.ts) for the "why" line, e.g. "Won on letters: 12 vs 9".
 
 ### 7. Games and rounds (`src/lib/game.ts`)
 - **Best of 3:** the game ends as soon as a player has **2 round wins**. If 3 rounds have been played and the score is level (e.g. win, draw, loss, or 3 draws), **extra rounds** follow until one player is ahead. Draws count as rounds played. `gameWinner(results)` returns the winner or null while the game goes on.
@@ -194,6 +195,7 @@ Payload (`BattleEnd` type): `{winnerColor, winnerName, durationMs, results: {[so
 | `spell:reveal` | server → room | `SpellReveal` (per mode, see §5) |
 | `spell:hint` | server → room | `{masked, limitMs?}` (hangman) |
 | `spell:hide` | server → room | `{limitMs}` (memorize) |
+| `spell:progress` | server → one player | `{masked, found, total}` (memorize: that player's found words) |
 | `spell:submitted` | server → one player | `{correct, durationMs, lockedOut?}` |
 | `grace` | server → room | `{seconds: 3}` |
 | `battle:end` | server → room | see §6 |

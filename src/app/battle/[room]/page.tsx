@@ -9,7 +9,7 @@ import VictoryAnimation from '@/components/VictoryAnimation';
 import BattleImage from '@/components/BattleImage';
 import ScoreTable from '@/components/ScoreTable';
 import { MODE_LABELS } from '@/lib/modes';
-import { roundLabel, drawReason } from '@/lib/game';
+import { roundLabel, drawReason, winDetail } from '@/lib/game';
 import type { PlayerColor, BattleMode, BattleEnd, GameInfo, GameScore } from '@/types/game';
 
 /** Where to send visitors of a room that no longer exists. The start page shows a notice for it. */
@@ -151,7 +151,7 @@ export default function BattlePage({ params }: { params: Promise<{ room: string 
           winnerColor={battleEnd.game.winner ?? battleEnd.winnerColor}
           winnerName={battleEnd.game.winner ? namesFrom(battleEnd.results)[battleEnd.game.winner] ?? null : battleEnd.winnerName}
           title={endTitle(battleEnd)}
-          subtitle={`Score ${scoreLine(battleEnd.game.score)}`}
+          subtitle={`${winDetail(battleEnd) ? `${winDetail(battleEnd)} · ` : ""}Score ${scoreLine(battleEnd.game.score)}`}
           durationMs={battleEnd.game.winner ? null : battleEnd.durationMs}
           drawReason={drawReason(battleEnd)}
         />
@@ -165,7 +165,7 @@ export default function BattlePage({ params }: { params: Promise<{ room: string 
               After {roundLabel(battleEnd.game.round).replace(' · Extra round', '')}
             </h2>
             <p className="text-gray-300 text-xl mb-8">
-              {battleEnd.winnerColor ? `${battleEnd.winnerName} won the round` : `Draw — ${drawReason(battleEnd).toLowerCase()}`}
+              {battleEnd.winnerColor ? `${battleEnd.winnerName} won the round${winDetail(battleEnd) ? ` (${winDetail(battleEnd)!.toLowerCase()})` : ""}` : `Draw — ${drawReason(battleEnd).toLowerCase()}`}
             </p>
             <ScoreTable names={namesFrom(battleEnd.results)} score={battleEnd.game.score} results={battleEnd.game.results} large />
             <p className="text-gray-400 text-lg mt-8 animate-pulse">Next round starts when both wizards press Next round on their phones…</p>

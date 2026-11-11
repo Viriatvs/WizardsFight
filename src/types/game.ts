@@ -27,8 +27,10 @@ export interface BattleEnd {
   winnerName: string | null;
   durationMs: number | null;
   /** Per player (keyed by socket id). Also the source of both names for the score table. */
-  results: Record<string, { color: PlayerColor; name: string; durationMs: number; correct: boolean }>;
+  results: Record<string, { color: PlayerColor; name: string; durationMs: number; correct: boolean; letters?: number }>;
   game: GameInfo;
+  /** Memorize: nobody completed the spell, the winner had more correct letters (see results[].letters). */
+  onLetters?: boolean;
   /** Mode of the round that ended (for mode-specific draw messages). */
   mode: BattleMode | null;
   timedOut?: boolean;
@@ -85,6 +87,8 @@ export interface Room {
   mode: BattleMode | null;
   /** Translate/describe: players who picked a wrong option this round. */
   lockedOut: Set<string>;
+  /** Memorize: spell word indices each player has found this round (socketId → indices). */
+  memorizeFound: Map<string, number[]>;
   /** Results of the current game's finished rounds. Cleared when a new game starts or is cancelled. */
   roundResults: RoundResults;
 }

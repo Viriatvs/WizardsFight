@@ -4,7 +4,10 @@ import { Server, Socket } from 'socket.io';
 import { createRoom, getRoom, sweepAbandonedRooms } from './src/lib/rooms';
 import { randomSpell, SPELLS } from './src/lib/spells';
 import { validateSubmission, determineWinner } from './src/lib/scoring';
-import { randomMode, buildChoices, maskSpell, revealRandomLetter, scramblePuzzle, isSolved, PUZZLE } from './src/lib/modes';
+import {
+  randomMode, buildChoices, maskSpell, scramblePuzzle, isSolved, PUZZLE,
+  hangmanStart, hangmanNextLetter, matchWords, maskWords, lettersFound, spellWordCount,
+} from './src/lib/modes';
 import { gameScore, gameWinner } from './src/lib/game';
 import type { Room, Player, PlayerColor, Submission, SpellReveal, GameInfo, BattleEnd } from './src/types/game';
 
@@ -18,7 +21,7 @@ const CHOICE_LIMIT_MS = 15000;
 const HANGMAN_STEP_MS = 1000;
 const HANGMAN_AFTER_FULL_MS = 40000;
 const MEMORIZE_SHOW_MS = 5000;
-const MEMORIZE_LIMIT_MS = 10000;
+const MEMORIZE_LIMIT_MS = 30000;
 const PUZZLE_LIMIT_MS = 60000;
 const ROOM_ABANDONED_MS = 10 * 60 * 1000;
 const ROOM_SWEEP_INTERVAL_MS = 60 * 1000;
@@ -58,6 +61,7 @@ function resetRoom(room: Room) {
   room.spellRevealedAt = null;
   room.submissions.clear();
   room.lockedOut.clear();
+  room.memorizeFound.clear();
   room.graceTimerStarted = false;
   room.firstCorrectAt = null;
   for (const p of room.players.values()) { p.rematchReady = false; p.fightReady = false; }
@@ -72,6 +76,7 @@ function endBattle(io: Server, room: Room, winner: Player | null, extra: Record<
   for (const p of room.players.values()) {
     const sub = room.submissions.get(p.socketId);
     results[p.socketId] = { color: p.color, name: p.name, durationMs: sub?.durationMs ?? -1, correct: !!sub || p === winner };
+    if (room.mode === 'memorize') results[p.socketId].letters = lettersFound(room.spell.latin, room.memorizeFound.get(p.socketId) ?? []);
   }
   const payload: BattleEnd = {
     winnerColor: winner?.color ?? null,
@@ -117,6 +122,16 @@ function laterInRound(room: Room, ms: number, fn: () => void) {
   }, ms);
 }
 
+/** Memorize time limit: nobody completed the spell, so more correct letters wins; equal letters is a draw. */
+function endMemorizeOnLetters(io: Server, room: Room) {
+  const scored = Array.from(room.players.values())
+    .map((p) => ({ p, letters: lettersFound(room.spell.latin, room.memorizeFound.get(p.socketId) ?? []) }))
+    .sort((a, b) => b.letters - a.letters);
+  const [best, second] = scored;
+  if (best && best.letters > (second?.letters ?? 0)) endBattle(io, room, best.p, { onLetters: true });
+  else endBattle(io, room, null, { timedOut: true });
+}
+
 function drawAfter(io: Server, room: Room, ms: number) {
   laterInRound(room, ms, () => endBattle(io, room, null, { timedOut: true }));
 }
@@ -136,12 +151,13 @@ function revealSpell(io: Server, room: Room) {
       return;
     }
     case 'hangman': {
-      let masked = maskSpell(latin);
+      // Starts with each word's first letter; then last letters, then random ones (hangmanNextLetter).
+      let masked = hangmanStart(latin);
       emit({ mode: 'hangman', masked, english, category, revealedAt });
       const round = room.round;
       const tick = setInterval(() => {
         if (room.round !== round || room.state !== 'playing') return clearInterval(tick);
-        masked = revealRandomLetter(latin, masked);
+        masked = hangmanNextLetter(latin, masked);
         const full = !masked.includes('_');
         io.to(room.id).emit('spell:hint', full ? { masked, limitMs: HANGMAN_AFTER_FULL_MS } : { masked });
         if (full) {
@@ -154,7 +170,7 @@ function revealSpell(io: Server, room: Room) {
     case 'memorize': {
       emit({ mode: 'memorize', latin, masked: maskSpell(latin), english, category, revealedAt, memorizeMs: MEMORIZE_SHOW_MS });
       laterInRound(room, MEMORIZE_SHOW_MS, () => io.to(room.id).emit('spell:hide', { limitMs: MEMORIZE_LIMIT_MS }));
-      drawAfter(io, room, MEMORIZE_SHOW_MS + MEMORIZE_LIMIT_MS);
+      laterInRound(room, MEMORIZE_SHOW_MS + MEMORIZE_LIMIT_MS, () => endMemorizeOnLetters(io, room));
       return;
     }
     case 'puzzle': {
@@ -352,10 +368,29 @@ app.prepare().then(() => {
       // Memorize: the spell is still on screen, so typing it now doesn't count.
       if (room.mode === 'memorize' && durationMs < MEMORIZE_SHOW_MS) return;
 
+      // Memorize: any correct words are revealed for this player only; they win once every word is found.
+      if (room.mode === 'memorize') {
+        const latin = room.spell.latin;
+        const before = room.memorizeFound.get(socket.id) ?? [];
+        const found = matchWords(latin, String(payload.text), before);
+        room.memorizeFound.set(socket.id, found);
+        const total = spellWordCount(latin);
+        if (found.length < total) {
+          if (found.length > before.length) {
+            io.to(socket.id).emit('spell:progress', { masked: maskWords(latin, found), found: found.length, total });
+          } else {
+            io.to(socket.id).emit('spell:submitted', { correct: false, durationMs, lockedOut: false });
+          }
+          return;
+        }
+      }
+
       const isChoice = room.mode === 'translate' || room.mode === 'describe';
       // Puzzle: the phone sends its final tile order ("0,1,2,…") once the picture is complete.
       // ponytail: the server trusts the phone's arrangement; replaying swaps would not stop a determined cheater either.
-      const correct = room.mode === 'puzzle'
+      const correct = room.mode === 'memorize'
+        ? true // only reached once every word was found (above)
+        : room.mode === 'puzzle'
         ? isSolved(String(payload.text).split(',').map(Number))
         : isChoice
           ? payload.text === (room.mode === 'translate' ? room.spell.english : room.spell.description)

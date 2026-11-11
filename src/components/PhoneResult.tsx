@@ -2,7 +2,7 @@
 
 import ScoreTable from '@/components/ScoreTable';
 import { VICTORY_GIF } from '@/components/VictoryAnimation';
-import { roundLabel, drawReason } from '@/lib/game';
+import { roundLabel, drawReason, winDetail } from '@/lib/game';
 import type { BattleEnd, PlayerColor } from '@/types/game';
 
 interface PhoneResultProps {
@@ -59,6 +59,7 @@ export default function PhoneResult({ end, myColor, waiting, opponentPresent, on
               {end.durationMs !== null && <div className="text-gray-400 font-mono mt-2">⚡ {end.durationMs.toLocaleString()} ms</div>}
               {end.graceTimeout && <p className="text-gray-400 text-sm mt-1">Opponent did not cast in time</p>}
               {end.forfeit && <p className="text-gray-400 text-sm mt-1">Opponent left the battle</p>}
+              {winDetail(end) && <p className="text-gray-300 font-mono mt-2">{winDetail(end)}</p>}
             </>
           ) : (
             <>

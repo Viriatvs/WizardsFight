@@ -21,6 +21,8 @@ interface SpellInputProps {
   disabled?: boolean;
   submitted?: { correct: boolean; durationMs: number } | null;
   graceSeconds?: number | null;
+  /** When this value changes, the input is cleared (memorize: after correct words were found). */
+  resetInputKey?: number;
 }
 
 function toSlots(masked: string): string {
@@ -29,7 +31,7 @@ function toSlots(masked: string): string {
 
 export default function SpellInput({
   category, text: spellText, slots, english, description, notice, inputVisible = true, deadline,
-  spellRevealedAt, onSubmit, disabled, submitted, graceSeconds,
+  spellRevealedAt, onSubmit, disabled, submitted, graceSeconds, resetInputKey,
 }: SpellInputProps) {
   const [text, setText] = useState('');
   const [elapsed, setElapsed] = useState(0);
@@ -65,6 +67,12 @@ export default function SpellInput({
   useEffect(() => {
     if (inputVisible) inputRef.current?.focus();
   }, [inputVisible]);
+
+  useEffect(() => {
+    if (!resetInputKey) return;
+    setText('');
+    inputRef.current?.focus();
+  }, [resetInputKey]);
 
   const handleSubmit = useCallback(
     (e: React.FormEvent) => {

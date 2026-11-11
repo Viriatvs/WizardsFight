@@ -21,6 +21,7 @@ export function createRoom(hostSocketId: string): Room {
     mode: null,
     lockedOut: new Set(),
     roundResults: [],
+    memorizeFound: new Map(),
   };
   rooms.set(id, room);
   return room;
