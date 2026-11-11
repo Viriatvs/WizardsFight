@@ -147,11 +147,24 @@ app.prepare().then(() => {
     socket.on('spell:submit', (payload: { roomId: string; text: string }) => {
       const room = getRoom(payload.roomId);
       if (!room || room.state !== 'playing' || !room.spellRevealedAt) return;
-      if (room.submissions.has(socket.id)) return;
 
       const submittedAt = Date.now();
       const durationMs = submittedAt - room.spellRevealedAt;
       const correct = validateSubmission(payload.text, room.spell);
+      const player = room.players.get(socket.id);
+
+      if (!correct) {
+        io.to(socket.id).emit('spell:submitted', {
+          correct: false,
+          durationMs,
+          expected: room.spell.latin,
+          submitted: payload.text,
+        });
+        console.log(`[room ${room.id}] ${player?.color} wrong attempt: "${payload.text}"`);
+        return;
+      }
+
+      if (room.submissions.has(socket.id)) return;
 
       const submission: Submission = {
         socketId: socket.id,
@@ -164,11 +177,10 @@ app.prepare().then(() => {
       };
 
       room.submissions.set(socket.id, submission);
-      const player = room.players.get(socket.id);
-      console.log(`[room ${room.id}] ${player?.color} submitted: correct=${correct} duration=${durationMs}ms`);
+      console.log(`[room ${room.id}] ${player?.color} correct: duration=${durationMs}ms`);
 
       io.to(socket.id).emit('spell:submitted', {
-        correct,
+        correct: true,
         durationMs,
         expected: room.spell.latin,
         submitted: payload.text,
@@ -183,7 +195,36 @@ app.prepare().then(() => {
           durationMs: result.durationMs,
           results: Object.fromEntries(result.results),
         });
-        console.log(`[room ${room.id}] battle ended, winner: ${result.winnerColor}`);
+        console.log(`[room ${room.id}] both correct, winner: ${result.winnerColor}`);
+        return;
+      }
+
+      if (!room.graceTimerStarted) {
+        room.graceTimerStarted = true;
+        room.firstCorrectAt = submittedAt;
+        io.to(room.id).emit('grace', { seconds: 3 });
+        console.log(`[room ${room.id}] grace period 3s for other wizard`);
+
+        setTimeout(() => {
+          if (room.state !== 'playing') return;
+          if (room.submissions.size < room.maxPlayers) {
+            room.state = 'ended';
+            const winner = player;
+            const results: Record<string, { color: PlayerColor; name: string; durationMs: number; correct: boolean }> = {};
+            for (const [sid, sub] of room.submissions.entries()) {
+              const p = room.players.get(sid);
+              if (p) results[sid] = { color: p.color, name: p.name, durationMs: sub.durationMs, correct: true };
+            }
+            io.to(room.id).emit('battle:end', {
+              winnerColor: winner?.color ?? null,
+              winnerName: winner?.name ?? null,
+              durationMs: winner ? room.submissions.get(winner.socketId)?.durationMs ?? null : null,
+              results,
+              graceTimeout: true,
+            });
+            console.log(`[room ${room.id}] grace timeout, winner: ${winner?.color}`);
+          }
+        }, 3000);
       }
     });
 

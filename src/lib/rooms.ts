@@ -15,6 +15,8 @@ export function createRoom(hostSocketId: string): Room {
     spellRevealedAt: null,
     submissions: new Map(),
     maxPlayers: 2,
+    graceTimerStarted: false,
+    firstCorrectAt: null,
   };
   rooms.set(id, room);
   return room;

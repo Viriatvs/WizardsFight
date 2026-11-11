@@ -28,6 +28,8 @@ export interface Room {
   spellRevealedAt: number | null;
   submissions: Map<string, Submission>;
   maxPlayers: number;
+  graceTimerStarted: boolean;
+  firstCorrectAt: number | null;
 }
 
 export interface SpellData {

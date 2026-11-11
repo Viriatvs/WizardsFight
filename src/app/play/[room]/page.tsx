@@ -15,13 +15,17 @@ export default function PlayPage({ params }: { params: Promise<{ room: string }>
   const [countdown, setCountdown] = useState<number | null>(null);
   const [showFight, setShowFight] = useState(false);
   const [spell, setSpell] = useState<SpellData | null>(null);
+  const [spellRevealedAt, setSpellRevealedAt] = useState(0);
   const [submitted, setSubmitted] = useState<{ correct: boolean; durationMs: number } | null>(null);
+  const [graceSeconds, setGraceSeconds] = useState<number | null>(null);
+  const graceTimerRef = useRef<ReturnType<typeof setInterval>>();
   const [battleEnd, setBattleEnd] = useState<{
     winnerColor: string | null;
     winnerName: string | null;
     durationMs: number | null;
     results: Record<string, { color: string; name: string; durationMs: number; correct: boolean }>;
     timedOut?: boolean;
+    graceTimeout?: boolean;
   } | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -61,15 +65,37 @@ export default function PlayPage({ params }: { params: Promise<{ room: string }>
     socket.on('spell:reveal', (data: { spell: SpellData; revealedAt: number }) => {
       setCountdown(null);
       setSpell(data.spell);
+      setSpellRevealedAt(data.revealedAt);
       setPhase('spell');
     });
 
     socket.on('spell:submitted', (data: { correct: boolean; durationMs: number }) => {
-      setSubmitted({ correct: data.correct, durationMs: data.durationMs });
+      if (!data.correct) {
+        setSubmitted({ correct: false, durationMs: data.durationMs });
+        setTimeout(() => setSubmitted(null), 2000);
+      } else {
+        setSubmitted({ correct: true, durationMs: data.durationMs });
+      }
+    });
+
+    socket.on('grace', (data: { seconds: number }) => {
+      setGraceSeconds(data.seconds);
+      let remaining = data.seconds;
+      graceTimerRef.current = setInterval(() => {
+        remaining--;
+        if (remaining <= 0) {
+          clearInterval(graceTimerRef.current);
+          setGraceSeconds(0);
+        } else {
+          setGraceSeconds(remaining);
+        }
+      }, 1000);
     });
 
     socket.on('battle:end', (data: typeof battleEnd) => {
       setCountdown(null);
+      setGraceSeconds(null);
+      if (graceTimerRef.current) clearInterval(graceTimerRef.current);
       setBattleEnd(data);
       setPhase('ended');
     });
@@ -141,24 +167,14 @@ export default function PlayPage({ params }: { params: Promise<{ room: string }>
           </div>
         )}
 
-        {phase === 'spell' && spell && !submitted && (
-          <SpellInput spell={spell} onSubmit={submitSpell} />
-        )}
-
-        {phase === 'spell' && spell && submitted && !battleEnd && (
-          <div className="text-center py-8">
-            <div className={`text-5xl font-bold mb-4 ${submitted.correct ? 'text-emerald-400 animate-bounce' : 'text-red-400'}`}>
-              {submitted.correct ? '✓ CORRECT!' : '✗ WRONG SPELL'}
-            </div>
-            {submitted.correct && (
-              <div className="text-gray-400 font-mono">
-                Time: {submitted.durationMs.toLocaleString()} ms
-              </div>
-            )}
-            <div className="text-gray-500 text-sm mt-4 animate-pulse">
-              Waiting for opponent…
-            </div>
-          </div>
+        {phase === 'spell' && spell && (
+          <SpellInput
+            spell={spell}
+            spellRevealedAt={spellRevealedAt}
+            onSubmit={submitSpell}
+            submitted={submitted}
+            graceSeconds={graceSeconds}
+          />
         )}
 
         {battleEnd && (
@@ -190,6 +206,9 @@ export default function PlayPage({ params }: { params: Promise<{ room: string }>
                 )}
                 {battleEnd.durationMs !== null && (
                   <div className="text-gray-400 font-mono mt-3">⚡ {battleEnd.durationMs.toLocaleString()} ms</div>
+                )}
+                {battleEnd.graceTimeout && (
+                  <p className="text-gray-400 text-sm mt-2">Opponent did not cast in time</p>
                 )}
               </>
             )}
