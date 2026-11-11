@@ -3,11 +3,10 @@ FROM node:22-slim
 WORKDIR /app
 
 COPY package.json package-lock.json ./
-RUN npm ci --include=dev
+RUN npm ci
 
 COPY . .
 
-ENV NODE_ENV=development
 RUN npm run build
 
 ENV NODE_ENV=production
