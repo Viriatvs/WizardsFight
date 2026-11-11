@@ -15,7 +15,9 @@ export default function PlayPage({ params }: { params: Promise<{ room: string }>
   const preferredColor = searchParams.get('color') as PlayerColor | null;
 
   const [phase, setPhase] = useState<GamePhase>('connecting');
+  const [name, setNameInput] = useState('');
   const [color, setColor] = useState<PlayerColor | null>(null);
+  const [nameReady, setNameReady] = useState(false);
   const [fightReady, setFightReady] = useState(false);
   const [bothReady, setBothReady] = useState(false);
   const [wins, setWins] = useState(0);
@@ -41,15 +43,7 @@ export default function PlayPage({ params }: { params: Promise<{ room: string }>
     socketRef.current = socket;
 
     socket.on('connect', () => {
-      socket.emit('room:join', { roomId, color: preferredColor || undefined }, (res: { success: boolean; color?: PlayerColor; error?: string }) => {
-        if (res.success && res.color) {
-          setColor(res.color);
-          setPhase('waiting');
-        } else {
-          setError(res.error || 'Failed to join');
-          setPhase('ended');
-        }
-      });
+      setPhase('name');
     });
 
     socket.on('room:update', (data: { state: string; players: Array<{ color: string; wins: number; fightReady: boolean }> }) => {
@@ -136,6 +130,20 @@ export default function PlayPage({ params }: { params: Promise<{ room: string }>
     return () => { socket.disconnect(); };
   }, [roomId]);
 
+  const submitName = useCallback(() => {
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    socketRef.current?.emit('room:join', { roomId, name: trimmed, color: preferredColor || undefined }, (res: { success: boolean; color?: PlayerColor; error?: string }) => {
+      if (res.success && res.color) {
+        setColor(res.color);
+        setPhase('waiting');
+      } else {
+        setError(res.error || 'Failed to join');
+        setPhase('ended');
+      }
+    });
+  }, [name, roomId, preferredColor]);
+
   const submitSpell = useCallback((text: string) => {
     socketRef.current?.emit('spell:submit', { roomId, text });
   }, [roomId]);
@@ -180,6 +188,36 @@ export default function PlayPage({ params }: { params: Promise<{ room: string }>
           <div className="text-center py-12">
             <div className="text-4xl mb-4 animate-spin inline-block">⏳</div>
             <p className="text-gray-400 text-lg">Connecting to battle…</p>
+          </div>
+        )}
+
+        {phase === 'name' && (
+          <div className="text-center py-12">
+            <div className="text-5xl mb-4">🧙</div>
+            <p className="text-gray-300 text-lg font-medium mb-2">What is your wizard name?</p>
+            <div className="max-w-xs mx-auto">
+              <input
+                type="text"
+                value={name}
+                onChange={(e) => setNameInput(e.target.value)}
+                placeholder="Your name…"
+                maxLength={24}
+                autoFocus
+                className="w-full px-4 py-3 text-base font-mono text-center bg-gray-900/80 border-2 border-gray-600 rounded-xl
+                  focus:border-amber-500 focus:outline-none focus:shadow-[0_0_15px_rgba(245,158,11,0.3)]
+                  placeholder:text-gray-500"
+              />
+              <button
+                onClick={submitName}
+                disabled={!name.trim()}
+                className="mt-4 w-full py-3 text-lg font-bold uppercase tracking-wider rounded-xl
+                  bg-amber-600 hover:bg-amber-500 text-white
+                  disabled:bg-gray-700 disabled:text-gray-400 disabled:cursor-not-allowed
+                  transition-colors shadow-lg"
+              >
+                Enter Battle
+              </button>
+            </div>
           </div>
         )}
 

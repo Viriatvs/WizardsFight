@@ -55,4 +55,4 @@ export interface BattleResult {
   }>;
 }
 
-export type GamePhase = 'connecting' | 'waiting' | 'countdown' | 'spell' | 'result' | 'ended';
+export type GamePhase = 'connecting' | 'name' | 'waiting' | 'countdown' | 'spell' | 'result' | 'ended';

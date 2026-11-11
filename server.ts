@@ -189,6 +189,23 @@ app.prepare().then(() => {
       }
     });
 
+    socket.on('player:name', (payload: { roomId: string; name: string }, cb?: (result: { success: boolean; error?: string }) => void) => {
+      const room = getRoom(payload.roomId);
+      if (!room) {
+        if (cb) cb({ success: false, error: 'Room not found' });
+        return;
+      }
+      const player = room.players.get(socket.id);
+      if (!player) {
+        if (cb) cb({ success: false, error: 'Not in this room' });
+        return;
+      }
+      player.name = payload.name.trim().slice(0, 24) || player.name;
+      io.to(room.id).emit('room:update', roomToPayload(room));
+      console.log(`[room ${room.id}] ${player.color} named: ${player.name}`);
+      if (cb) cb({ success: true });
+    });
+
     socket.on('player:ready', (payload: { roomId: string }, cb?: (result: { success: boolean; error?: string }) => void) => {
       const room = getRoom(payload.roomId);
       if (!room || room.state !== 'waiting') {
