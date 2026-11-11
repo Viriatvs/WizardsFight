@@ -1,6 +1,6 @@
 export type RoomState = 'waiting' | 'countdown' | 'playing' | 'ended';
 export type PlayerColor = 'blue' | 'red';
-export type BattleMode = 'type' | 'translate' | 'describe' | 'hangman' | 'memorize';
+export type BattleMode = 'type' | 'translate' | 'describe' | 'hangman' | 'memorize' | 'puzzle';
 
 /** One entry per finished round of the current game: the winner's color, or null for a draw. */
 export type RoundResults = Array<PlayerColor | null>;
@@ -29,6 +29,8 @@ export interface BattleEnd {
   /** Per player (keyed by socket id). Also the source of both names for the score table. */
   results: Record<string, { color: PlayerColor; name: string; durationMs: number; correct: boolean }>;
   game: GameInfo;
+  /** Mode of the round that ended (for mode-specific draw messages). */
+  mode: BattleMode | null;
   timedOut?: boolean;
   graceTimeout?: boolean;
   allWrong?: boolean;
@@ -44,7 +46,9 @@ export type SpellReveal =
   | { mode: 'type'; spell: SpellData; revealedAt: number }
   | { mode: 'translate' | 'describe'; latin: string; category: string; options: string[]; revealedAt: number; limitMs: number }
   | { mode: 'hangman'; masked: string; english: string; category: string; revealedAt: number }
-  | { mode: 'memorize'; latin: string; masked: string; english: string; category: string; revealedAt: number; memorizeMs: number };
+  | { mode: 'memorize'; latin: string; masked: string; english: string; category: string; revealedAt: number; memorizeMs: number }
+  /** order[slot] = tile shown in that slot; both players get the same order. */
+  | { mode: 'puzzle'; image: string; cols: number; rows: number; order: number[]; revealedAt: number; limitMs: number };
 
 export interface Player {
   socketId: string;

@@ -1,7 +1,7 @@
 // Pure helpers for battle modes. Shared by server and client: no Node or browser APIs here.
 import type { BattleMode, SpellData } from '@/types/game';
 
-export const MODES: BattleMode[] = ['type', 'translate', 'describe', 'hangman', 'memorize'];
+export const MODES: BattleMode[] = ['type', 'translate', 'describe', 'hangman', 'memorize', 'puzzle'];
 
 export const MODE_LABELS: Record<BattleMode, string> = {
   type: 'Speed Cast',
@@ -9,7 +9,12 @@ export const MODE_LABELS: Record<BattleMode, string> = {
   describe: 'Describe',
   hangman: 'Hangman',
   memorize: 'Memorize',
+  puzzle: 'Puzzle',
 };
+
+/** Puzzle mode: 600x800 crop of red-wizard_ready.png, cut into 3 x 4 = 12 tiles. */
+export const PUZZLE = { image: '/images/puzzle-red-wizard.webp', cols: 3, rows: 4 } as const;
+const PUZZLE_TILES = PUZZLE.cols * PUZZLE.rows;
 
 export const CHOICE_COUNT = 4;
 
@@ -35,6 +40,21 @@ export function buildChoices(spell: SpellData, pool: SpellData[], field: 'englis
   const correct = spell[field];
   const others = [...new Set(pool.map((s) => s[field]))].filter((v) => v !== correct);
   return shuffle([correct, ...shuffle(others, rand).slice(0, CHOICE_COUNT - 1)], rand);
+}
+
+/**
+ * Puzzle: order[slot] = which tile is shown in that slot. Solved when order[i] === i.
+ * The scramble is never already solved.
+ */
+export function scramblePuzzle(rand: Rand = Math.random, tiles: number = PUZZLE_TILES): number[] {
+  const solved = Array.from({ length: tiles }, (_, i) => i);
+  let order = shuffle(solved, rand);
+  while (isSolved(order)) order = shuffle(solved, rand);
+  return order;
+}
+
+export function isSolved(order: number[], tiles: number = PUZZLE_TILES): boolean {
+  return order.length === tiles && order.every((tile, slot) => tile === slot);
 }
 
 /** Every letter becomes "_"; spaces stay so word lengths are visible. */

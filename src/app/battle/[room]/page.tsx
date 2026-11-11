@@ -9,7 +9,7 @@ import VictoryAnimation from '@/components/VictoryAnimation';
 import BattleImage from '@/components/BattleImage';
 import ScoreTable from '@/components/ScoreTable';
 import { MODE_LABELS } from '@/lib/modes';
-import { roundLabel } from '@/lib/game';
+import { roundLabel, drawReason } from '@/lib/game';
 import type { PlayerColor, BattleMode, BattleEnd, GameInfo, GameScore } from '@/types/game';
 
 /** Where to send visitors of a room that no longer exists. The start page shows a notice for it. */
@@ -136,7 +136,6 @@ export default function BattlePage({ params }: { params: Promise<{ room: string 
     return end.winnerColor ? `${roundLabel(end.game.round)} goes to` : roundLabel(end.game.round);
   };
 
-  const drawReason = (end: BattleEnd) => (end.allWrong ? 'Both wizards chose wrong' : 'No valid spell cast in time');
 
   return (
     <main className="flex-1 flex flex-col items-center px-4 py-8 min-h-screen">

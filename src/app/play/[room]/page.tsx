@@ -7,6 +7,7 @@ import Countdown from '@/components/Countdown';
 import SpellInput from '@/components/SpellInput';
 import ChoiceInput from '@/components/ChoiceInput';
 import PhoneResult from '@/components/PhoneResult';
+import PuzzleInput from '@/components/PuzzleInput';
 import { MODE_LABELS } from '@/lib/modes';
 import { roundLabel } from '@/lib/game';
 import type { PlayerColor, GamePhase, BattleMode, SpellReveal, GameInfo, BattleEnd } from '@/types/game';
@@ -332,6 +333,18 @@ export default function PlayPage({ params }: { params: Promise<{ room: string }>
             {notice && <p role="status" className="text-amber-300 text-sm mt-4">{notice}. A new opponent can join with the QR code.</p>}
             {error && <p role="alert" className="text-red-400 text-sm mt-4">{error}</p>}
           </div>
+        )}
+
+        {phase === 'spell' && reveal?.mode === 'puzzle' && (
+          <PuzzleInput
+            image={reveal.image}
+            cols={reveal.cols}
+            rows={reveal.rows}
+            initialOrder={reveal.order}
+            onSolved={submitSpell}
+            result={submitted}
+            deadline={deadline}
+          />
         )}
 
         {phase === 'spell' && reveal && (reveal.mode === 'translate' || reveal.mode === 'describe') && (

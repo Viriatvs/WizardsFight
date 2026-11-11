@@ -4,7 +4,7 @@ import { Server, Socket } from 'socket.io';
 import { createRoom, getRoom, sweepAbandonedRooms } from './src/lib/rooms';
 import { randomSpell, SPELLS } from './src/lib/spells';
 import { validateSubmission, determineWinner } from './src/lib/scoring';
-import { randomMode, buildChoices, maskSpell, revealRandomLetter } from './src/lib/modes';
+import { randomMode, buildChoices, maskSpell, revealRandomLetter, scramblePuzzle, isSolved, PUZZLE } from './src/lib/modes';
 import { gameScore, gameWinner } from './src/lib/game';
 import type { Room, Player, PlayerColor, Submission, SpellReveal, GameInfo, BattleEnd } from './src/types/game';
 
@@ -16,9 +16,10 @@ const TYPE_LIMIT_MS = 30000;
 const GRACE_MS = 3000;
 const CHOICE_LIMIT_MS = 15000;
 const HANGMAN_STEP_MS = 1000;
-const HANGMAN_AFTER_FULL_MS = 5000;
+const HANGMAN_AFTER_FULL_MS = 40000;
 const MEMORIZE_SHOW_MS = 5000;
 const MEMORIZE_LIMIT_MS = 10000;
+const PUZZLE_LIMIT_MS = 60000;
 const ROOM_ABANDONED_MS = 10 * 60 * 1000;
 const ROOM_SWEEP_INTERVAL_MS = 60 * 1000;
 
@@ -78,6 +79,7 @@ function endBattle(io: Server, room: Room, winner: Player | null, extra: Record<
     durationMs: winner ? room.submissions.get(winner.socketId)?.durationMs ?? null : null,
     results,
     game: gameInfo(room),
+    mode: room.mode,
     ...extra,
   };
   io.to(room.id).emit('battle:end', payload);
@@ -153,6 +155,11 @@ function revealSpell(io: Server, room: Room) {
       emit({ mode: 'memorize', latin, masked: maskSpell(latin), english, category, revealedAt, memorizeMs: MEMORIZE_SHOW_MS });
       laterInRound(room, MEMORIZE_SHOW_MS, () => io.to(room.id).emit('spell:hide', { limitMs: MEMORIZE_LIMIT_MS }));
       drawAfter(io, room, MEMORIZE_SHOW_MS + MEMORIZE_LIMIT_MS);
+      return;
+    }
+    case 'puzzle': {
+      emit({ mode: 'puzzle', ...PUZZLE, order: scramblePuzzle(), revealedAt, limitMs: PUZZLE_LIMIT_MS });
+      drawAfter(io, room, PUZZLE_LIMIT_MS);
       return;
     }
     default:
@@ -346,9 +353,13 @@ app.prepare().then(() => {
       if (room.mode === 'memorize' && durationMs < MEMORIZE_SHOW_MS) return;
 
       const isChoice = room.mode === 'translate' || room.mode === 'describe';
-      const correct = isChoice
-        ? payload.text === (room.mode === 'translate' ? room.spell.english : room.spell.description)
-        : validateSubmission(payload.text, room.spell);
+      // Puzzle: the phone sends its final tile order ("0,1,2,…") once the picture is complete.
+      // ponytail: the server trusts the phone's arrangement; replaying swaps would not stop a determined cheater either.
+      const correct = room.mode === 'puzzle'
+        ? isSolved(String(payload.text).split(',').map(Number))
+        : isChoice
+          ? payload.text === (room.mode === 'translate' ? room.spell.english : room.spell.description)
+          : validateSubmission(payload.text, room.spell);
 
       if (!correct) {
         // Choice modes: one pick per round. Typing modes: retry freely.

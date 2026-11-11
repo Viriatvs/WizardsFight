@@ -2,7 +2,7 @@
 
 import ScoreTable from '@/components/ScoreTable';
 import { VICTORY_GIF } from '@/components/VictoryAnimation';
-import { roundLabel } from '@/lib/game';
+import { roundLabel, drawReason } from '@/lib/game';
 import type { BattleEnd, PlayerColor } from '@/types/game';
 
 interface PhoneResultProps {
@@ -64,7 +64,7 @@ export default function PhoneResult({ end, myColor, waiting, opponentPresent, on
             <>
               <div className="text-4xl mb-2">💀</div>
               <div className="text-3xl font-black text-gray-400">DRAW</div>
-              <p className="text-gray-500 mt-1">{end.allWrong ? 'Both wizards chose wrong' : 'No valid spell cast in time'}</p>
+              <p className="text-gray-500 mt-1">{drawReason(end)}</p>
             </>
           )}
         </>

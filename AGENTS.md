@@ -66,7 +66,8 @@ src/
   lib/rooms.ts             In-memory room store: createRoom / getRoom / deleteRoom / sweepAbandonedRooms (+ rooms.test.ts)
   lib/spells.ts            Server-only: parses /spells.md at startup + randomSpell(excludeLatin)
   lib/scoring.ts           normalizeSpell, validateSubmission, determineWinner
-  lib/modes.ts             Battle modes: MODES, MODE_LABELS, randomMode, buildChoices, maskSpell, revealRandomLetter (pure, shared)
+  lib/modes.ts             Battle modes: MODES, MODE_LABELS, randomMode, buildChoices, maskSpell, revealRandomLetter,
+                           PUZZLE, scramblePuzzle, isSolved (pure, shared)
   lib/modes.test.ts        Unit tests for modes.ts
   app/layout.tsx           Root layout (dark background)
   app/page.tsx             Landing page: "Start Fight" creates a room, then goes to /battle/:id
@@ -77,8 +78,10 @@ src/
                            VictoryAnimation (host overlay: player's name as headline over the GIF),
                            SpellInput (typing modes: full spell / letter slots / memorize phase), ChoiceInput (4 options),
                            ScoreTable (Blue vs Red: won/lost/draws + per-round chips),
-                           PhoneResult (phone screen after a round or game)
+                           PhoneResult (phone screen after a round or game), PuzzleInput (puzzle board)
 public/images/             Battlefield scenes (empty / blue ready / red ready / both) + victory GIFs per color
+                           + puzzle-red-wizard.webp (600x800 crop of red-wizard_ready.png at x1190 y70 w420 h560,
+                           nearest-neighbour scaled with sharp; regenerate the same way if the source image changes)
 ```
 
 The server is authoritative. Pages are `'use client'`. Each page opens its own Socket.IO connection in a `useEffect` and keeps UI state in `useState`. The server code imports from `src/lib` and `src/types`, so treat those modules as shared between server and client. Keep them free of browser and React code.
@@ -137,7 +140,8 @@ Time is always measured on the server: `durationMs = serverNow - spellRevealedAt
 | `type` | Speed Cast | `{spell, revealedAt}` | `SpellInput`: Latin, English, description | Type it; unlimited retries | Both correct → fastest wins. One correct → `grace {seconds:3}`, then they win (`graceTimeout`). Draw after 30 s (`timedOut`). |
 | `translate` | Translate | `{latin, category, options[4], revealedAt, limitMs}` | `ChoiceInput`: Latin + 4 English translations | **One pick.** A wrong pick puts you in `lockedOut` for the round. | First correct pick wins. All players wrong → draw (`allWrong`). Draw after 15 s (`timedOut`). |
 | `describe` | Describe | Same as translate | `ChoiceInput`: Latin + 4 descriptions | Same as translate | Same as translate |
-| `hangman` | Hangman | `{masked, english, category, revealedAt}` | `SpellInput` with letter slots + English hint | Type it; unlimited retries | The server sends `spell:hint {masked}` every 1 s, uncovering one random letter. With the last letter it adds `limitMs: 5000`. First correct wins. Draw 5 s after the last letter (`timedOut`). |
+| `hangman` | Hangman | `{masked, english, category, revealedAt}` | `SpellInput` with letter slots + English hint | Type it; unlimited retries | The server sends `spell:hint {masked}` every 1 s, uncovering one random letter. With the last letter it adds `limitMs: 40000`. First correct wins. Draw 40 s after the last letter (`timedOut`, `HANGMAN_AFTER_FULL_MS`). |
+| `puzzle` | Puzzle | `{image, cols:3, rows:4, order[12], revealedAt, limitMs}` (same scramble for both, never pre-solved) | `PuzzleInput`: 12 tile buttons, each showing its part of `/images/puzzle-red-wizard.webp` via CSS `background-position`. Tap two tiles to swap; no preview. | When the picture is complete the phone sends its order as `"0,1,…,11"`; the server checks `isSolved` (unsolved arrangements are ignored). | First solved wins. Draw after 60 s (`PUZZLE_LIMIT_MS`, `timedOut`). |
 | `memorize` | Memorize | `{latin, masked, english, category, revealedAt, memorizeMs}` | Latin + "MEMORIZE IT" for 5 s (no input), then `spell:hide {limitMs: 10000}` → dashes + English hint + input | Type it; unlimited retries. Submits during the 5 s memorize phase are ignored. | First correct wins. Draw 10 s after hiding (`timedOut`). |
 
 - Options in Translate/Describe: `buildChoices` takes the correct answer plus 3 different answers from other spells and shuffles them. The server checks the chosen text exactly against `spell.english` / `spell.description`.
@@ -201,8 +205,8 @@ If you add or change an event, update both the server handler in `server.ts` and
 ## Conventions
 
 - **Spells** live in `/spells.md`, not in code. `src/lib/spells.ts` reads that file once when the server starts, so changes need a restart or deploy. The Latin may contain only letters and spaces, because players type it exactly. If a row is invalid, the server refuses to start and names the line. `spells.ts` uses `fs`, so never import it from client components.
-- **Timing constants:** the mode timings are named constants at the top of `server.ts` (`TYPE_LIMIT_MS`, `GRACE_MS`, `CHOICE_LIMIT_MS`, `HANGMAN_*`, `MEMORIZE_*`, `ROOM_ABANDONED_MS`, `ROOM_SWEEP_INTERVAL_MS`). The 2 s pre-battle delay is still written inline.
-- **Adding a mode:** add it to `BattleMode` and `SpellReveal` (types), `MODES`/`MODE_LABELS` (modes.ts), a `case` in `revealSpell()` and the answer rules in the `spell:submit` handler (server.ts), and the phone UI in `play/[room]/page.tsx`. Then document it in §5.
+- **Timing constants:** the mode timings are named constants at the top of `server.ts` (`TYPE_LIMIT_MS`, `GRACE_MS`, `CHOICE_LIMIT_MS`, `HANGMAN_*`, `MEMORIZE_*`, `PUZZLE_LIMIT_MS`, `ROOM_ABANDONED_MS`, `ROOM_SWEEP_INTERVAL_MS`). The 2 s pre-battle delay is still written inline.
+- **Adding a mode:** add it to `BattleMode` and `SpellReveal` (types), `MODES`/`MODE_LABELS` (modes.ts), a `case` in `revealSpell()` and the answer rules in the `spell:submit` handler (server.ts), and the phone UI in `play/[room]/page.tsx`. If its draw needs its own wording, add it to `drawReason()` (game.ts). Then document it in §5.
 - **Colors:** blue = Tailwind `blue-400/500`, red = `red-400/500`, accent = `amber-*`, background `#0a0a1a`. Animations use the classes in `globals.css` (`animate-countdown`, `battle-text`, `spell-glow`, `animate-shake`, `confetti-piece`, `btn-fight`, …).
 - **Path alias:** `@/*` → `src/*`. `tsx` resolves it for `server.ts` too.
 - **Mobile first** for `/play`, because phones are the controllers. `/battle` targets a large screen.

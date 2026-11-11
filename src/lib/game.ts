@@ -1,5 +1,5 @@
 // Game rules: a game is a series of rounds. Pure and shared by server and client.
-import type { PlayerColor, RoundResults, GameScore } from '@/types/game';
+import type { PlayerColor, RoundResults, GameScore, BattleEnd } from '@/types/game';
 
 export type { RoundResults, GameScore };
 
@@ -30,4 +30,11 @@ export function gameWinner(results: RoundResults): PlayerColor | null {
 /** Label for a round number (1-based), e.g. "Round 2" or "Round 4 · Extra round". */
 export function roundLabel(round: number): string {
   return round > BASE_ROUNDS ? `Round ${round} · Extra round` : `Round ${round}`;
+}
+
+/** Why a round ended without a winner, for the result screens. */
+export function drawReason(end: Pick<BattleEnd, 'allWrong' | 'mode'>): string {
+  if (end.allWrong) return 'Both wizards chose wrong';
+  if (end.mode === 'puzzle') return 'Nobody finished the puzzle in time';
+  return 'No valid spell cast in time';
 }
