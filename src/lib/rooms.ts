@@ -18,6 +18,8 @@ export function createRoom(hostSocketId: string): Room {
     graceTimerStarted: false,
     firstCorrectAt: null,
     round: 0,
+    mode: null,
+    lockedOut: new Set(),
   };
   rooms.set(id, room);
   return room;

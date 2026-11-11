@@ -5,7 +5,25 @@ import { io, Socket } from 'socket.io-client';
 import { useSearchParams } from 'next/navigation';
 import Countdown from '@/components/Countdown';
 import SpellInput from '@/components/SpellInput';
-import type { PlayerColor, GamePhase, SpellData } from '@/types/game';
+import ChoiceInput from '@/components/ChoiceInput';
+import { MODE_LABELS } from '@/lib/modes';
+import type { PlayerColor, GamePhase, BattleMode, SpellReveal } from '@/types/game';
+
+/** What SpellInput shows for the typing modes; null for the choice modes. */
+function typingDisplay(reveal: SpellReveal, memorizeHidden: boolean) {
+  switch (reveal.mode) {
+    case 'type':
+      return { category: reveal.spell.category, text: reveal.spell.latin, english: reveal.spell.english, description: reveal.spell.description };
+    case 'hangman':
+      return { category: reveal.category, text: reveal.masked, slots: true, english: reveal.english };
+    case 'memorize':
+      return memorizeHidden
+        ? { category: reveal.category, text: reveal.masked, slots: true, english: reveal.english }
+        : { category: reveal.category, text: reveal.latin, english: reveal.english, notice: 'Memorize it', inputVisible: false };
+    default:
+      return null;
+  }
+}
 
 export default function PlayPage({ params }: { params: Promise<{ room: string }> }) {
   const { room: roomId } = use(params);
@@ -17,14 +35,20 @@ export default function PlayPage({ params }: { params: Promise<{ room: string }>
   const [phase, setPhase] = useState<GamePhase>('connecting');
   const [name, setNameInput] = useState('');
   const [color, setColor] = useState<PlayerColor | null>(null);
+  // Socket handlers are registered once, so they read the color from a ref instead of the stale state.
+  const colorRef = useRef<PlayerColor | null>(null);
   const [nameReady, setNameReady] = useState(false);
   const [fightReady, setFightReady] = useState(false);
   const [bothReady, setBothReady] = useState(false);
+  const [playerCount, setPlayerCount] = useState(0);
   const [wins, setWins] = useState(0);
   const [countdown, setCountdown] = useState<number | null>(null);
   const [showFight, setShowFight] = useState(false);
-  const [spell, setSpell] = useState<SpellData | null>(null);
-  const [spellRevealedAt, setSpellRevealedAt] = useState(0);
+  const [mode, setMode] = useState<BattleMode | null>(null);
+  const [reveal, setReveal] = useState<SpellReveal | null>(null);
+  /** Local timestamp when the round ends in a draw, when the server told us. */
+  const [deadline, setDeadline] = useState<number | null>(null);
+  const [memorizeHidden, setMemorizeHidden] = useState(false);
   const [submitted, setSubmitted] = useState<{ correct: boolean; durationMs: number } | null>(null);
   const [graceSeconds, setGraceSeconds] = useState<number | null>(null);
   const graceTimerRef = useRef<ReturnType<typeof setInterval>>();
@@ -35,6 +59,7 @@ export default function PlayPage({ params }: { params: Promise<{ room: string }>
     results: Record<string, { color: string; name: string; durationMs: number; correct: boolean }>;
     timedOut?: boolean;
     graceTimeout?: boolean;
+    allWrong?: boolean;
   } | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -46,23 +71,25 @@ export default function PlayPage({ params }: { params: Promise<{ room: string }>
       setPhase('name');
     });
 
-    socket.on('room:update', (data: { state: string; players: Array<{ color: string; wins: number; fightReady: boolean }> }) => {
+    socket.on('room:update', (data: { state: string; mode: BattleMode | null; players: Array<{ color: string; wins: number; fightReady: boolean }> }) => {
+      setMode(data.mode);
       if (data.state === 'countdown') setPhase('countdown');
       if (data.state === 'playing') setPhase('spell');
       if (data.state === 'waiting') {
         setPhase('waiting');
         setSubmitted(null);
-        setSpell(null);
+        setReveal(null);
+        setDeadline(null);
+        setMemorizeHidden(false);
         setGraceSeconds(null);
         setBattleEnd(null);
       }
-      if (color) {
-        const me = data.players.find((p) => p.color === color);
-        if (me) {
-          setWins(me.wins);
-          setFightReady(me.fightReady);
-        }
+      const me = data.players.find((p) => p.color === colorRef.current);
+      if (me) {
+        setWins(me.wins);
+        setFightReady(me.fightReady);
       }
+      setPlayerCount(data.players.length);
       setBothReady(
         data.players.length >= 2 && data.players.every((p) => p.fightReady),
       );
@@ -79,17 +106,31 @@ export default function PlayPage({ params }: { params: Promise<{ room: string }>
       setTimeout(() => setShowFight(false), 1000);
     });
 
-    socket.on('spell:reveal', (data: { spell: SpellData; revealedAt: number }) => {
+    socket.on('spell:reveal', (data: SpellReveal) => {
       setCountdown(null);
-      setSpell(data.spell);
-      setSpellRevealedAt(data.revealedAt);
+      setReveal(data);
+      setMemorizeHidden(false);
+      setDeadline('limitMs' in data ? Date.now() + data.limitMs : null);
       setPhase('spell');
     });
 
-    socket.on('spell:submitted', (data: { correct: boolean; durationMs: number }) => {
+    // Hangman: one more letter uncovered. limitMs arrives with the last letter.
+    socket.on('spell:hint', (data: { masked: string; limitMs?: number }) => {
+      setReveal((r) => (r?.mode === 'hangman' ? { ...r, masked: data.masked } : r));
+      if (data.limitMs) setDeadline(Date.now() + data.limitMs);
+    });
+
+    // Memorize: the spell disappears, typing starts.
+    socket.on('spell:hide', (data: { limitMs: number }) => {
+      setMemorizeHidden(true);
+      setDeadline(Date.now() + data.limitMs);
+    });
+
+    socket.on('spell:submitted', (data: { correct: boolean; durationMs: number; lockedOut?: boolean }) => {
       if (!data.correct) {
         setSubmitted({ correct: false, durationMs: data.durationMs });
-        setTimeout(() => setSubmitted(null), 2000);
+        // A locked-out player keeps the "wrong" state; typing modes clear it so they can retry.
+        if (!data.lockedOut) setTimeout(() => setSubmitted(null), 2000);
       } else {
         setSubmitted({ correct: true, durationMs: data.durationMs });
       }
@@ -113,7 +154,7 @@ export default function PlayPage({ params }: { params: Promise<{ room: string }>
       setCountdown(null);
       setGraceSeconds(null);
       if (graceTimerRef.current) clearInterval(graceTimerRef.current);
-      if (data.wins && color) setWins(data.wins[color] ?? 0);
+      if (data.wins && colorRef.current) setWins(data.wins[colorRef.current] ?? 0);
       setBattleEnd(data);
       setPhase('ended');
     });
@@ -135,6 +176,7 @@ export default function PlayPage({ params }: { params: Promise<{ room: string }>
     if (!trimmed) return;
     socketRef.current?.emit('room:join', { roomId, name: trimmed, color: preferredColor || undefined }, (res: { success: boolean; color?: PlayerColor; error?: string }) => {
       if (res.success && res.color) {
+        colorRef.current = res.color;
         setColor(res.color);
         setPhase('waiting');
       } else {
@@ -143,6 +185,13 @@ export default function PlayPage({ params }: { params: Promise<{ room: string }>
       }
     });
   }, [name, roomId, preferredColor]);
+
+  const pressFight = useCallback(() => {
+    setError(null);
+    socketRef.current?.emit('player:ready', { roomId }, (res: { success: boolean; error?: string }) => {
+      if (!res.success) setError(res.error || 'Could not get ready');
+    });
+  }, [roomId]);
 
   const submitSpell = useCallback((text: string) => {
     socketRef.current?.emit('spell:submit', { roomId, text });
@@ -153,7 +202,7 @@ export default function PlayPage({ params }: { params: Promise<{ room: string }>
 
   return (
     <main className="flex-1 flex flex-col items-center justify-center min-h-screen px-4 py-6">
-      {countdown !== null && <Countdown seconds={countdown} />}
+      {countdown !== null && <Countdown seconds={countdown} label={mode ? MODE_LABELS[mode] : undefined} />}
 
       {showFight && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm">
@@ -181,6 +230,9 @@ export default function PlayPage({ params }: { params: Promise<{ room: string }>
                 You are {color === 'blue' ? '🔵 Blue' : '🔴 Red'}
               </span>
             </div>
+          )}
+          {mode && (phase === 'countdown' || phase === 'spell') && (
+            <div className="mt-2 text-amber-400 text-sm font-bold uppercase tracking-widest">Mode: {MODE_LABELS[mode]}</div>
           )}
         </div>
 
@@ -224,15 +276,46 @@ export default function PlayPage({ params }: { params: Promise<{ room: string }>
         {phase === 'waiting' && (
           <div className="text-center py-12">
             <div className="text-5xl mb-4 animate-bounce inline-block">🧙</div>
-            <p className="text-gray-300 text-lg font-medium">Battle will start soon…</p>
-            <p className="text-gray-500 text-sm mt-2">Waiting for players on the host screen</p>
+            {bothReady ? (
+              <p className="text-amber-300 text-lg font-bold">Both wizards ready — battle starting…</p>
+            ) : fightReady ? (
+              <p className="text-gray-300 text-lg font-medium">Ready! Waiting for your opponent to press Let&apos;s Fight…</p>
+            ) : (
+              <div className="max-w-xs mx-auto">
+                <button
+                  onClick={pressFight}
+                  disabled={playerCount < 2}
+                  className="btn-fight w-full py-4 text-xl font-black uppercase tracking-wider text-white rounded-2xl
+                    disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  ⚔️ Let&apos;s Fight
+                </button>
+                <p className="text-gray-500 text-sm mt-3">
+                  {playerCount < 2 ? 'Waiting for an opponent to join…' : 'Press when you are ready to duel'}
+                </p>
+              </div>
+            )}
+            {error && <p role="alert" className="text-red-400 text-sm mt-4">{error}</p>}
           </div>
         )}
 
-        {phase === 'spell' && spell && (
+        {phase === 'spell' && reveal && (reveal.mode === 'translate' || reveal.mode === 'describe') && (
+          <ChoiceInput
+            latin={reveal.latin}
+            category={reveal.category}
+            question={reveal.mode === 'translate' ? 'translation' : 'description'}
+            options={reveal.options}
+            onPick={submitSpell}
+            result={submitted}
+            deadline={deadline}
+          />
+        )}
+
+        {phase === 'spell' && reveal && typingDisplay(reveal, memorizeHidden) && (
           <SpellInput
-            spell={spell}
-            spellRevealedAt={spellRevealedAt}
+            {...typingDisplay(reveal, memorizeHidden)!}
+            deadline={deadline}
+            spellRevealedAt={reveal.revealedAt}
             onSubmit={submitSpell}
             submitted={submitted}
             graceSeconds={graceSeconds}
@@ -245,7 +328,7 @@ export default function PlayPage({ params }: { params: Promise<{ room: string }>
               <>
                 <div className="text-5xl mb-4">💀</div>
                 <div className="text-3xl font-black text-gray-400">DRAW</div>
-                <p className="text-gray-500 mt-2">No valid spell cast</p>
+                <p className="text-gray-500 mt-2">{battleEnd.allWrong ? 'Both wizards chose wrong' : 'No valid spell cast'}</p>
               </>
             ) : (
               <>

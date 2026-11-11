@@ -7,11 +7,13 @@ import PlayerCard from '@/components/PlayerCard';
 import Countdown from '@/components/Countdown';
 import VictoryAnimation from '@/components/VictoryAnimation';
 import BattleImage from '@/components/BattleImage';
-import type { PlayerColor } from '@/types/game';
+import { MODE_LABELS } from '@/lib/modes';
+import type { PlayerColor, BattleMode } from '@/types/game';
 
 interface RoomData {
   id: string;
   state: string;
+  mode: BattleMode | null;
   players: Array<{ color: string; name: string; socketId: string; wins: number; rematchReady: boolean; fightReady: boolean }>;
   playerCount: number;
   maxPlayers: number;
@@ -101,7 +103,7 @@ export default function BattlePage({ params }: { params: Promise<{ room: string 
 
   return (
     <main className="flex-1 flex flex-col items-center px-4 py-8 min-h-screen">
-      {countdown !== null && <Countdown seconds={countdown} />}
+      {countdown !== null && <Countdown seconds={countdown} label={room?.mode ? MODE_LABELS[room.mode] : undefined} />}
       {battleEnd && (
         <VictoryAnimation
           winnerColor={(battleEnd.winnerColor as PlayerColor) ?? null}
@@ -193,7 +195,9 @@ export default function BattlePage({ params }: { params: Promise<{ room: string 
           )}
 
           {room && (room.state === 'countdown' || room.state === 'playing') && !battleEnd && (
-            <div className="text-amber-400 text-2xl font-bold animate-pulse">Battle in progress…</div>
+            <div className="text-amber-400 text-2xl font-bold animate-pulse">
+              Battle in progress{room.mode ? ` — ${MODE_LABELS[room.mode]}` : ''}…
+            </div>
           )}
 
           {battleEnd && (

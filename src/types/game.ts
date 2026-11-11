@@ -1,5 +1,17 @@
 export type RoomState = 'waiting' | 'countdown' | 'playing' | 'ended';
 export type PlayerColor = 'blue' | 'red';
+export type BattleMode = 'type' | 'translate' | 'describe' | 'hangman' | 'memorize';
+
+/**
+ * What the phones receive when a round starts. Each mode only gets what it must show,
+ * so the answer never reaches a phone early (except memorize, which shows it for a few seconds).
+ * limitMs: time left until the round ends in a draw, when known.
+ */
+export type SpellReveal =
+  | { mode: 'type'; spell: SpellData; revealedAt: number }
+  | { mode: 'translate' | 'describe'; latin: string; category: string; options: string[]; revealedAt: number; limitMs: number }
+  | { mode: 'hangman'; masked: string; english: string; category: string; revealedAt: number }
+  | { mode: 'memorize'; latin: string; masked: string; english: string; category: string; revealedAt: number; memorizeMs: number };
 
 export interface Player {
   socketId: string;
@@ -34,6 +46,9 @@ export interface Room {
   graceTimerStarted: boolean;
   firstCorrectAt: number | null;
   round: number;
+  mode: BattleMode | null;
+  /** Translate/describe: players who picked a wrong option this round. */
+  lockedOut: Set<string>;
 }
 
 export interface SpellData {
