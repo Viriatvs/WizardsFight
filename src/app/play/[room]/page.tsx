@@ -234,7 +234,14 @@ export default function PlayPage({ params }: { params: Promise<{ room: string }>
 
             <div className="mt-8 flex gap-4 justify-center">
               <button
-                onClick={() => socketRef.current?.emit('player:reset', { roomId })}
+                onClick={() => {
+                  socketRef.current?.emit('player:reset', { roomId }, (res: { success: boolean; error?: string }) => {
+                    if (!res.success) {
+                      setError(res.error || 'Cannot join rematch');
+                      setTimeout(() => setError(null), 5000);
+                    }
+                  });
+                }}
                 className="px-8 py-3 bg-amber-600 hover:bg-amber-500 text-white font-bold rounded-xl transition-colors"
               >
                 ⚔️ Battle Again
