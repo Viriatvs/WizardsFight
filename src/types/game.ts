@@ -8,6 +8,7 @@ export interface Player {
   joinedAt: number;
   wins: number;
   rematchReady: boolean;
+  fightReady: boolean;
 }
 
 export interface Submission {

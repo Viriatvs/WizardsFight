@@ -1,3 +1,5 @@
+'use client';
+
 import type { PlayerColor } from '@/types/game';
 
 interface PlayerCardProps {
@@ -8,6 +10,8 @@ interface PlayerCardProps {
   result?: { durationMs: number; correct: boolean } | null;
   isWinner?: boolean;
   wins?: number;
+  joinUrl?: string;
+  fightReady?: boolean;
 }
 
 const colorConfig = {
@@ -18,6 +22,7 @@ const colorConfig = {
     text: 'text-blue-400',
     bg: 'bg-blue-500/10',
     dot: 'bg-blue-500',
+    emoji: '🧙‍♂️',
   },
   red: {
     label: 'RED WIZARD',
@@ -26,50 +31,53 @@ const colorConfig = {
     text: 'text-red-400',
     bg: 'bg-red-500/10',
     dot: 'bg-red-500',
+    emoji: '🧙‍♀️',
   },
 };
 
-export default function PlayerCard({ color, name, joined, connected, result, isWinner, wins }: PlayerCardProps) {
+export default function PlayerCard({ color, name, joined, connected, result, isWinner, wins, joinUrl }: PlayerCardProps) {
   const c = colorConfig[color];
 
   if (!joined) {
     return (
-      <div className="flex flex-col items-center justify-center gap-2 p-6 rounded-2xl border-2 border-dashed border-gray-600 opacity-40">
-        <div className="w-3 h-3 rounded-full bg-gray-600" />
-        <span className="text-gray-500 text-sm uppercase tracking-wider">{c.label}</span>
-        <span className="text-gray-600 text-xs">Waiting for player…</span>
+      <div className="flex flex-col items-center justify-center gap-2 p-6 rounded-2xl border-2 border-dashed border-gray-600 opacity-60 hover:opacity-100 transition-opacity">
+        {joinUrl ? (
+          <a href={joinUrl} target="_blank" rel="noopener noreferrer" className="flex flex-col items-center gap-3 cursor-pointer">
+            <span className={`text-5xl ${c.text}`}>{c.emoji}</span>
+            <span className="text-gray-400 text-sm uppercase tracking-wider">{c.label}</span>
+            <span className="text-gray-500 text-xs">Click to open wizard tab</span>
+          </a>
+        ) : (
+          <>
+            <div className="w-3 h-3 rounded-full bg-gray-600" />
+            <span className="text-gray-500 text-sm uppercase tracking-wider">{c.label}</span>
+            <span className="text-gray-600 text-xs">Waiting for player…</span>
+          </>
+        )}
       </div>
     );
   }
 
   return (
-    <div
-      className={`flex flex-col items-center gap-2 p-6 rounded-2xl border-2 ${c.border} ${c.bg} ${c.glow} ${isWinner ? 'scale-105' : ''} transition-all`}
-    >
+    <div className={`flex flex-col items-center gap-2 p-6 rounded-2xl border-2 ${c.border} ${c.bg} ${c.glow} ${isWinner ? 'scale-105' : ''} transition-all`}>
       {wins !== undefined && wins > 0 && (
         <div className={`text-3xl font-black ${c.text}`}>🏆 {wins}</div>
       )}
-
       <div className="flex items-center gap-2">
         <div className={`w-3 h-3 rounded-full ${c.dot} ${connected ? 'animate-pulse' : 'opacity-30'}`} />
         <span className={`font-bold text-sm uppercase tracking-wider ${c.text}`}>{c.label}</span>
       </div>
-
       <span className="text-gray-300 text-base">{name || (color === 'blue' ? 'Blue Wizard' : 'Red Wizard')}</span>
-
       {result !== undefined && result !== null && (
         <div className="text-center">
           <span className={result.correct ? 'text-emerald-400' : 'text-red-400'}>
             {result.correct ? '✓ Correct' : '✗ Wrong'}
           </span>
           {result.durationMs >= 0 && (
-            <span className="text-gray-400 text-sm font-mono block">
-              {result.durationMs.toLocaleString()} ms
-            </span>
+            <span className="text-gray-400 text-sm font-mono block">{result.durationMs.toLocaleString()} ms</span>
           )}
         </div>
       )}
-
       {isWinner && (
         <span className="text-amber-400 text-sm font-bold uppercase animate-pulse">★ Winner ★</span>
       )}

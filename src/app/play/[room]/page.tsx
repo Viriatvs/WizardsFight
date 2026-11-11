@@ -2,6 +2,7 @@
 
 import { useState, useCallback, useEffect, useRef, use } from 'react';
 import { io, Socket } from 'socket.io-client';
+import { useSearchParams } from 'next/navigation';
 import Countdown from '@/components/Countdown';
 import SpellInput from '@/components/SpellInput';
 import type { PlayerColor, GamePhase, SpellData } from '@/types/game';
@@ -10,8 +11,13 @@ export default function PlayPage({ params }: { params: Promise<{ room: string }>
   const { room: roomId } = use(params);
   const socketRef = useRef<Socket | null>(null);
 
+  const searchParams = useSearchParams();
+  const preferredColor = searchParams.get('color') as PlayerColor | null;
+
   const [phase, setPhase] = useState<GamePhase>('connecting');
   const [color, setColor] = useState<PlayerColor | null>(null);
+  const [fightReady, setFightReady] = useState(false);
+  const [bothReady, setBothReady] = useState(false);
   const [wins, setWins] = useState(0);
   const [countdown, setCountdown] = useState<number | null>(null);
   const [showFight, setShowFight] = useState(false);
@@ -35,7 +41,7 @@ export default function PlayPage({ params }: { params: Promise<{ room: string }>
     socketRef.current = socket;
 
     socket.on('connect', () => {
-      socket.emit('room:join', { roomId }, (res: { success: boolean; color?: PlayerColor; error?: string }) => {
+      socket.emit('room:join', { roomId, color: preferredColor || undefined }, (res: { success: boolean; color?: PlayerColor; error?: string }) => {
         if (res.success && res.color) {
           setColor(res.color);
           setPhase('waiting');
@@ -46,7 +52,7 @@ export default function PlayPage({ params }: { params: Promise<{ room: string }>
       });
     });
 
-    socket.on('room:update', (data: { state: string; players: Array<{ color: string; wins: number }> }) => {
+    socket.on('room:update', (data: { state: string; players: Array<{ color: string; wins: number; fightReady: boolean }> }) => {
       if (data.state === 'countdown') setPhase('countdown');
       if (data.state === 'playing') setPhase('spell');
       if (data.state === 'waiting') {
@@ -58,8 +64,14 @@ export default function PlayPage({ params }: { params: Promise<{ room: string }>
       }
       if (color) {
         const me = data.players.find((p) => p.color === color);
-        if (me) setWins(me.wins);
+        if (me) {
+          setWins(me.wins);
+          setFightReady(me.fightReady);
+        }
       }
+      setBothReady(
+        data.players.length >= 2 && data.players.every((p) => p.fightReady),
+      );
     });
 
     socket.on('countdown', (data: { seconds: number }) => {

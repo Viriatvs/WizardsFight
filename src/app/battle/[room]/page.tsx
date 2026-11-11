@@ -12,7 +12,7 @@ import type { PlayerColor } from '@/types/game';
 interface RoomData {
   id: string;
   state: string;
-  players: Array<{ color: string; name: string; socketId: string; wins: number }>;
+  players: Array<{ color: string; name: string; socketId: string; wins: number; rematchReady: boolean; fightReady: boolean }>;
   playerCount: number;
   maxPlayers: number;
 }
@@ -88,6 +88,8 @@ export default function BattlePage({ params }: { params: Promise<{ room: string 
   const redPlayer = room?.players.find((p) => p.color === 'red');
   const canStart = room?.state === 'waiting' && room?.playerCount === room?.maxPlayers;
 
+  const playUrl = (c: string) => typeof window !== 'undefined' ? `${window.location.origin}/play/${roomId}?color=${c}` : '';
+
   const blueResult = battleEnd ? Object.values(battleEnd.results).find((r) => r.color === 'blue') ?? null : null;
   const redResult = battleEnd ? Object.values(battleEnd.results).find((r) => r.color === 'red') ?? null : null;
 
@@ -152,6 +154,7 @@ export default function BattlePage({ params }: { params: Promise<{ room: string 
               result={battleEnd ? blueResult : null}
               isWinner={battleEnd?.winnerColor === 'blue'}
               wins={battleEnd ? Object.values(battleEnd.results).find((r) => r.color === 'blue')?.wins ?? 0 : 0}
+              joinUrl={!bluePlayer ? playUrl('blue') : undefined}
             />
             <PlayerCard
               color="red"
@@ -161,6 +164,7 @@ export default function BattlePage({ params }: { params: Promise<{ room: string 
               result={battleEnd ? redResult : null}
               isWinner={battleEnd?.winnerColor === 'red'}
               wins={battleEnd ? Object.values(battleEnd.results).find((r) => r.color === 'red')?.wins ?? 0 : 0}
+              joinUrl={!redPlayer ? playUrl('red') : undefined}
             />
           </div>
         </div>
@@ -183,8 +187,8 @@ export default function BattlePage({ params }: { params: Promise<{ room: string 
           )}
 
           {canStart && !battleEnd && (
-            <div className="text-amber-300 text-2xl font-bold animate-pulse uppercase tracking-wider">
-              ⚔️ Starting Battle…
+            <div className="text-amber-300 text-2xl font-bold uppercase tracking-wider">
+              ⚔️ Both wizards present — press <span className="text-amber-400 underline">Let&apos;s Fight</span> on each phone
             </div>
           )}
 
