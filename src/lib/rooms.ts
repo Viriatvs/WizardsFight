@@ -17,6 +17,7 @@ export function createRoom(hostSocketId: string): Room {
     maxPlayers: 2,
     graceTimerStarted: false,
     firstCorrectAt: null,
+    round: 0,
   };
   rooms.set(id, room);
   return room;

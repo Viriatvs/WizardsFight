@@ -61,6 +61,7 @@ function getWinsPayload(room: Room) {
 function startBattle(io: Server, room: Room) {
   if (room.state !== 'waiting' || room.players.size < room.maxPlayers) return;
 
+  room.round++;
   room.state = 'countdown';
   room.startedAt = Date.now();
   io.to(room.id).emit('room:update', roomToPayload(room));
@@ -87,17 +88,17 @@ function startBattle(io: Server, room: Room) {
       io.to(room.id).emit('spell:reveal', { spell, revealedAt: room.spellRevealedAt });
       console.log(`[room ${room.id}] spell revealed: ${spell.latin}`);
 
+      const currentRound = room.round;
       setTimeout(() => {
-        if (room.state === 'playing') {
-          room.state = 'ended';
-          applyWins(room, null);
-          const results: Record<string, { color: PlayerColor; name: string; durationMs: number; correct: boolean; wins: number }> = {};
-          for (const player of room.players.values()) {
-            results[player.socketId] = { color: player.color, name: player.name, durationMs: -1, correct: false, wins: player.wins };
-          }
-          io.to(room.id).emit('battle:end', { winnerColor: null, winnerName: null, durationMs: null, results, timedOut: true, wins: getWinsPayload(room) });
-          console.log(`[room ${room.id}] timed out`);
+        if (room.round !== currentRound || room.state !== 'playing') return;
+        room.state = 'ended';
+        applyWins(room, null);
+        const results: Record<string, { color: PlayerColor; name: string; durationMs: number; correct: boolean; wins: number }> = {};
+        for (const player of room.players.values()) {
+          results[player.socketId] = { color: player.color, name: player.name, durationMs: -1, correct: false, wins: player.wins };
         }
+        io.to(room.id).emit('battle:end', { winnerColor: null, winnerName: null, durationMs: null, results, timedOut: true, wins: getWinsPayload(room) });
+        console.log(`[room ${room.id}] timed out`);
       }, 30000);
     }
   }, 1000);
@@ -241,8 +242,9 @@ app.prepare().then(() => {
         io.to(room.id).emit('grace', { seconds: 3 });
         console.log(`[room ${room.id}] grace period 3s for other wizard`);
 
+        const graceRound = room.round;
         setTimeout(() => {
-          if (room.state !== 'playing') return;
+          if (room.round !== graceRound || room.state !== 'playing') return;
           if (room.submissions.size < room.maxPlayers) {
             room.state = 'ended';
             const winner = player;

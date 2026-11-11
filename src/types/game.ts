@@ -32,6 +32,7 @@ export interface Room {
   maxPlayers: number;
   graceTimerStarted: boolean;
   firstCorrectAt: number | null;
+  round: number;
 }
 
 export interface SpellData {
