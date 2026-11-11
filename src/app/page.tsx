@@ -69,6 +69,12 @@ export default function LandingPage() {
           <span className="hidden sm:inline">•</span>
           <span>Server-timed Scoring</span>
         </div>
+
+        <footer className="mt-12 pb-6 text-center">
+          <p className="text-gray-500 text-xs sm:text-sm leading-relaxed">
+            Created by the portuguese hero <span className="font-semibold text-gray-400">MOSORIO</span> based on the idea of the mighty warrior <span className="font-semibold text-gray-400">HREYNOLDS</span>
+          </p>
+        </footer>
       </div>
     </main>
   );
