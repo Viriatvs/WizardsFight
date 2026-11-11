@@ -12,7 +12,7 @@ import type { PlayerColor } from '@/types/game';
 interface RoomData {
   id: string;
   state: string;
-  players: Array<{ color: string; name: string; socketId: string }>;
+  players: Array<{ color: string; name: string; socketId: string; wins: number }>;
   playerCount: number;
   maxPlayers: number;
 }
@@ -21,8 +21,10 @@ interface BattleEndData {
   winnerColor: string | null;
   winnerName: string | null;
   durationMs: number | null;
-  results: Record<string, { color: string; name: string; durationMs: number; correct: boolean }>;
+  results: Record<string, { color: string; name: string; durationMs: number; correct: boolean; wins: number }>;
   timedOut?: boolean;
+  graceTimeout?: boolean;
+  wins?: Record<string, number>;
 }
 
 export default function BattlePage({ params }: { params: Promise<{ room: string }> }) {
@@ -89,6 +91,12 @@ export default function BattlePage({ params }: { params: Promise<{ room: string 
   const blueResult = battleEnd ? Object.values(battleEnd.results).find((r) => r.color === 'blue') ?? null : null;
   const redResult = battleEnd ? Object.values(battleEnd.results).find((r) => r.color === 'red') ?? null : null;
 
+  const playAgain = () => {
+    setBattleEnd(null);
+    setBattleStarted(false);
+    socketRef.current?.emit('player:reset', { roomId });
+  };
+
   return (
     <main className="flex-1 flex flex-col items-center px-4 py-8 min-h-screen">
       {countdown !== null && <Countdown seconds={countdown} />}
@@ -143,6 +151,7 @@ export default function BattlePage({ params }: { params: Promise<{ room: string 
               connected={!battleEnd && !!bluePlayer}
               result={battleEnd ? blueResult : null}
               isWinner={battleEnd?.winnerColor === 'blue'}
+              wins={battleEnd ? Object.values(battleEnd.results).find((r) => r.color === 'blue')?.wins ?? 0 : 0}
             />
             <PlayerCard
               color="red"
@@ -151,6 +160,7 @@ export default function BattlePage({ params }: { params: Promise<{ room: string 
               connected={!battleEnd && !!redPlayer}
               result={battleEnd ? redResult : null}
               isWinner={battleEnd?.winnerColor === 'red'}
+              wins={battleEnd ? Object.values(battleEnd.results).find((r) => r.color === 'red')?.wins ?? 0 : 0}
             />
           </div>
         </div>
@@ -184,8 +194,8 @@ export default function BattlePage({ params }: { params: Promise<{ room: string 
 
           {battleEnd && (
             <button
-              onClick={() => window.location.reload()}
-              className="mt-6 px-10 py-3 bg-gray-700 hover:bg-gray-600 text-white font-bold text-lg rounded-xl transition-colors"
+              onClick={playAgain}
+              className="mt-6 px-10 py-3 bg-amber-600 hover:bg-amber-500 text-white font-bold text-lg rounded-xl transition-colors"
             >
               🔄 Play Again
             </button>

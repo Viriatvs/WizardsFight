@@ -6,6 +6,7 @@ export interface Player {
   color: PlayerColor;
   name: string;
   joinedAt: number;
+  wins: number;
 }
 
 export interface Submission {

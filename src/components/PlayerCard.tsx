@@ -7,6 +7,7 @@ interface PlayerCardProps {
   connected?: boolean;
   result?: { durationMs: number; correct: boolean } | null;
   isWinner?: boolean;
+  wins?: number;
 }
 
 const colorConfig = {
@@ -28,13 +29,13 @@ const colorConfig = {
   },
 };
 
-export default function PlayerCard({ color, name, joined, connected, result, isWinner }: PlayerCardProps) {
+export default function PlayerCard({ color, name, joined, connected, result, isWinner, wins }: PlayerCardProps) {
   const c = colorConfig[color];
 
   if (!joined) {
     return (
-      <div className={`flex flex-col items-center justify-center gap-2 p-6 rounded-2xl border-2 border-dashed border-gray-600 opacity-40`}>
-        <div className={`w-3 h-3 rounded-full bg-gray-600`} />
+      <div className="flex flex-col items-center justify-center gap-2 p-6 rounded-2xl border-2 border-dashed border-gray-600 opacity-40">
+        <div className="w-3 h-3 rounded-full bg-gray-600" />
         <span className="text-gray-500 text-sm uppercase tracking-wider">{c.label}</span>
         <span className="text-gray-600 text-xs">Waiting for player…</span>
       </div>
@@ -45,6 +46,10 @@ export default function PlayerCard({ color, name, joined, connected, result, isW
     <div
       className={`flex flex-col items-center gap-2 p-6 rounded-2xl border-2 ${c.border} ${c.bg} ${c.glow} ${isWinner ? 'scale-105' : ''} transition-all`}
     >
+      {wins !== undefined && wins > 0 && (
+        <div className={`text-3xl font-black ${c.text}`}>🏆 {wins}</div>
+      )}
+
       <div className="flex items-center gap-2">
         <div className={`w-3 h-3 rounded-full ${c.dot} ${connected ? 'animate-pulse' : 'opacity-30'}`} />
         <span className={`font-bold text-sm uppercase tracking-wider ${c.text}`}>{c.label}</span>

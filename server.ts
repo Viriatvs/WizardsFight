@@ -13,9 +13,9 @@ const app = next({ dev });
 const handle = app.getRequestHandler();
 
 function roomToPayload(room: Room) {
-  const players: Array<{ color: string; name: string; socketId: string }> = [];
+  const players: Array<{ color: string; name: string; socketId: string; wins: number }> = [];
   for (const player of room.players.values()) {
-    players.push({ color: player.color, name: player.name, socketId: player.socketId });
+    players.push({ color: player.color, name: player.name, socketId: player.socketId, wins: player.wins });
   }
   return {
     id: room.id,
@@ -27,6 +27,34 @@ function roomToPayload(room: Room) {
     spellRevealedAt: room.spellRevealedAt,
     startedAt: room.startedAt,
   };
+}
+
+function resetRoom(room: Room) {
+  room.state = 'waiting';
+  room.spell = { latin: '', english: '', description: '', category: '' };
+  room.startedAt = null;
+  room.spellRevealedAt = null;
+  room.submissions.clear();
+  room.graceTimerStarted = false;
+  room.firstCorrectAt = null;
+}
+
+function applyWins(room: Room, winnerColor: PlayerColor | null) {
+  for (const player of room.players.values()) {
+    if (winnerColor && player.color === winnerColor) {
+      player.wins++;
+    } else {
+      player.wins = 0;
+    }
+  }
+}
+
+function getWinsPayload(room: Room) {
+  const wins: Record<string, number> = {};
+  for (const player of room.players.values()) {
+    wins[player.color] = player.wins;
+  }
+  return wins;
 }
 
 function startBattle(io: Server, room: Room) {
@@ -61,11 +89,12 @@ function startBattle(io: Server, room: Room) {
       setTimeout(() => {
         if (room.state === 'playing') {
           room.state = 'ended';
-          const results: Record<string, { color: PlayerColor; name: string; durationMs: number; correct: boolean }> = {};
+          applyWins(room, null);
+          const results: Record<string, { color: PlayerColor; name: string; durationMs: number; correct: boolean; wins: number }> = {};
           for (const player of room.players.values()) {
-            results[player.socketId] = { color: player.color, name: player.name, durationMs: -1, correct: false };
+            results[player.socketId] = { color: player.color, name: player.name, durationMs: -1, correct: false, wins: player.wins };
           }
-          io.to(room.id).emit('battle:end', { winnerColor: null, winnerName: null, durationMs: null, results, timedOut: true });
+          io.to(room.id).emit('battle:end', { winnerColor: null, winnerName: null, durationMs: null, results, timedOut: true, wins: getWinsPayload(room) });
           console.log(`[room ${room.id}] timed out`);
         }
       }, 30000);
@@ -124,7 +153,7 @@ app.prepare().then(() => {
       const color = colors.find((c) => !usedColors.has(c))!;
       const name = payload.name?.trim() || (color === 'blue' ? 'Blue Wizard' : 'Red Wizard');
 
-      const player = { socketId: socket.id, color, name, joinedAt: Date.now() };
+      const player = { socketId: socket.id, color, name, joinedAt: Date.now(), wins: 0 };
       room.players.set(socket.id, player);
       socket.data.roomId = room.id;
       socket.data.role = 'player';
@@ -154,12 +183,7 @@ app.prepare().then(() => {
       const player = room.players.get(socket.id);
 
       if (!correct) {
-        io.to(socket.id).emit('spell:submitted', {
-          correct: false,
-          durationMs,
-          expected: room.spell.latin,
-          submitted: payload.text,
-        });
+        io.to(socket.id).emit('spell:submitted', { correct: false, durationMs, expected: room.spell.latin, submitted: payload.text });
         console.log(`[room ${room.id}] ${player?.color} wrong attempt: "${payload.text}"`);
         return;
       }
@@ -179,21 +203,23 @@ app.prepare().then(() => {
       room.submissions.set(socket.id, submission);
       console.log(`[room ${room.id}] ${player?.color} correct: duration=${durationMs}ms`);
 
-      io.to(socket.id).emit('spell:submitted', {
-        correct: true,
-        durationMs,
-        expected: room.spell.latin,
-        submitted: payload.text,
-      });
+      io.to(socket.id).emit('spell:submitted', { correct: true, durationMs, expected: room.spell.latin, submitted: payload.text });
 
       if (room.submissions.size >= room.maxPlayers) {
         room.state = 'ended';
         const result = determineWinner(room.submissions, room.players);
+        applyWins(room, result.winnerColor);
+        const results: Record<string, { color: PlayerColor; name: string; durationMs: number; correct: boolean; wins: number }> = {};
+        for (const [sid, sub] of room.submissions.entries()) {
+          const p = room.players.get(sid);
+          if (p) results[sid] = { color: p.color, name: p.name, durationMs: sub.durationMs, correct: true, wins: p.wins };
+        }
         io.to(room.id).emit('battle:end', {
           winnerColor: result.winnerColor,
           winnerName: result.winnerName,
           durationMs: result.durationMs,
-          results: Object.fromEntries(result.results),
+          results,
+          wins: getWinsPayload(room),
         });
         console.log(`[room ${room.id}] both correct, winner: ${result.winnerColor}`);
         return;
@@ -210,10 +236,11 @@ app.prepare().then(() => {
           if (room.submissions.size < room.maxPlayers) {
             room.state = 'ended';
             const winner = player;
-            const results: Record<string, { color: PlayerColor; name: string; durationMs: number; correct: boolean }> = {};
+            applyWins(room, winner?.color ?? null);
+            const results: Record<string, { color: PlayerColor; name: string; durationMs: number; correct: boolean; wins: number }> = {};
             for (const [sid, sub] of room.submissions.entries()) {
               const p = room.players.get(sid);
-              if (p) results[sid] = { color: p.color, name: p.name, durationMs: sub.durationMs, correct: true };
+              if (p) results[sid] = { color: p.color, name: p.name, durationMs: sub.durationMs, correct: true, wins: p.wins };
             }
             io.to(room.id).emit('battle:end', {
               winnerColor: winner?.color ?? null,
@@ -221,10 +248,53 @@ app.prepare().then(() => {
               durationMs: winner ? room.submissions.get(winner.socketId)?.durationMs ?? null : null,
               results,
               graceTimeout: true,
+              wins: getWinsPayload(room),
             });
             console.log(`[room ${room.id}] grace timeout, winner: ${winner?.color}`);
           }
         }, 3000);
+      }
+    });
+
+    socket.on('player:reset', (payload: { roomId: string }) => {
+      const room = getRoom(payload.roomId);
+      if (!room || room.state !== 'ended') return;
+
+      resetRoom(room);
+      io.to(room.id).emit('room:update', roomToPayload(room));
+      console.log(`[room ${room.id}] battle reset for rematch`);
+
+      if (room.players.size >= room.maxPlayers) {
+        setTimeout(() => {
+          const r = getRoom(room.id);
+          if (r && r.state === 'waiting') startBattle(io, r);
+        }, 2000);
+      }
+    });
+
+    socket.on('player:exit', (payload: { roomId: string }) => {
+      const room = getRoom(payload.roomId);
+      if (!room) return;
+
+      const player = room.players.get(socket.id);
+      if (player) {
+        console.log(`[room ${room.id}] ${player.color} exited`);
+        room.players.delete(socket.id);
+        socket.data.roomId = undefined;
+        socket.data.role = undefined;
+
+        io.to(room.id).emit('player:disconnected', { color: player.color, name: player.name });
+        io.to(room.id).emit('room:update', roomToPayload(room));
+      }
+
+      if (room.players.size === 0 && room.hostSocketId !== socket.id) {
+        setTimeout(() => {
+          const r = getRoom(room.id);
+          if (r && r.players.size === 0) {
+            deleteRoom(room.id);
+            console.log(`[room ${room.id}] deleted (empty)`);
+          }
+        }, 30000);
       }
     });
 
@@ -244,12 +314,13 @@ app.prepare().then(() => {
                 const others = Array.from(room.players.values()).filter((p) => p.socketId !== socket.id);
                 if (others.length > 0) {
                   const winner = others[0];
-                  const results: Record<string, { color: PlayerColor; name: string; durationMs: number; correct: boolean }> = {
-                    [winner.socketId]: { color: winner.color, name: winner.name, durationMs: 0, correct: true },
+                  applyWins(room, winner.color);
+                  const results: Record<string, { color: PlayerColor; name: string; durationMs: number; correct: boolean; wins: number }> = {
+                    [winner.socketId]: { color: winner.color, name: winner.name, durationMs: 0, correct: true, wins: winner.wins },
                   };
-                  io.to(room.id).emit('battle:end', { winnerColor: winner.color, winnerName: winner.name, durationMs: null, results });
+                  io.to(room.id).emit('battle:end', { winnerColor: winner.color, winnerName: winner.name, durationMs: null, results, wins: getWinsPayload(room) });
                 } else {
-                  io.to(room.id).emit('battle:end', { winnerColor: null, winnerName: null, durationMs: null, results: {} });
+                  io.to(room.id).emit('battle:end', { winnerColor: null, winnerName: null, durationMs: null, results: {}, wins: {} });
                 }
               }
             }
@@ -265,7 +336,7 @@ app.prepare().then(() => {
                 deleteRoom(room.id);
                 console.log(`[room ${room.id}] deleted (empty)`);
               }
-            }, 10000);
+            }, 30000);
           }
         }
       }

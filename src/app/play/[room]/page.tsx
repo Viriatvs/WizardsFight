@@ -12,6 +12,7 @@ export default function PlayPage({ params }: { params: Promise<{ room: string }>
 
   const [phase, setPhase] = useState<GamePhase>('connecting');
   const [color, setColor] = useState<PlayerColor | null>(null);
+  const [wins, setWins] = useState(0);
   const [countdown, setCountdown] = useState<number | null>(null);
   const [showFight, setShowFight] = useState(false);
   const [spell, setSpell] = useState<SpellData | null>(null);
@@ -45,10 +46,20 @@ export default function PlayPage({ params }: { params: Promise<{ room: string }>
       });
     });
 
-    socket.on('room:update', (data: { state: string }) => {
+    socket.on('room:update', (data: { state: string; players: Array<{ color: string; wins: number }> }) => {
       if (data.state === 'countdown') setPhase('countdown');
       if (data.state === 'playing') setPhase('spell');
-      if (data.state === 'waiting') setPhase('waiting');
+      if (data.state === 'waiting') {
+        setPhase('waiting');
+        setSubmitted(null);
+        setSpell(null);
+        setGraceSeconds(null);
+        setBattleEnd(null);
+      }
+      if (color) {
+        const me = data.players.find((p) => p.color === color);
+        if (me) setWins(me.wins);
+      }
     });
 
     socket.on('countdown', (data: { seconds: number }) => {
@@ -92,10 +103,11 @@ export default function PlayPage({ params }: { params: Promise<{ room: string }>
       }, 1000);
     });
 
-    socket.on('battle:end', (data: typeof battleEnd) => {
+    socket.on('battle:end', (data: typeof battleEnd & { wins?: Record<string, number> }) => {
       setCountdown(null);
       setGraceSeconds(null);
       if (graceTimerRef.current) clearInterval(graceTimerRef.current);
+      if (data.wins && color) setWins(data.wins[color] ?? 0);
       setBattleEnd(data);
       setPhase('ended');
     });
@@ -212,6 +224,28 @@ export default function PlayPage({ params }: { params: Promise<{ room: string }>
                 )}
               </>
             )}
+
+            {wins > 0 && (
+              <div className="mt-6 text-center">
+                <span className={`text-5xl font-black ${colorClass}`}>🏆 {wins}</span>
+                <div className="text-gray-400 text-sm mt-1 uppercase tracking-wider">consecutive win{wins > 1 ? 's' : ''}</div>
+              </div>
+            )}
+
+            <div className="mt-8 flex gap-4 justify-center">
+              <button
+                onClick={() => socketRef.current?.emit('player:reset', { roomId })}
+                className="px-8 py-3 bg-amber-600 hover:bg-amber-500 text-white font-bold rounded-xl transition-colors"
+              >
+                ⚔️ Battle Again
+              </button>
+              <button
+                onClick={() => { socketRef.current?.emit('player:exit', { roomId }); window.location.href = '/'; }}
+                className="px-8 py-3 bg-gray-700 hover:bg-gray-600 text-white font-bold rounded-xl transition-colors"
+              >
+                Exit
+              </button>
+            </div>
           </div>
         )}
 
