@@ -7,6 +7,7 @@ export interface Player {
   name: string;
   joinedAt: number;
   wins: number;
+  rematchReady: boolean;
 }
 
 export interface Submission {

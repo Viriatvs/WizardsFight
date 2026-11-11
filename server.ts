@@ -13,9 +13,9 @@ const app = next({ dev });
 const handle = app.getRequestHandler();
 
 function roomToPayload(room: Room) {
-  const players: Array<{ color: string; name: string; socketId: string; wins: number }> = [];
+  const players: Array<{ color: string; name: string; socketId: string; wins: number; rematchReady: boolean }> = [];
   for (const player of room.players.values()) {
-    players.push({ color: player.color, name: player.name, socketId: player.socketId, wins: player.wins });
+    players.push({ color: player.color, name: player.name, socketId: player.socketId, wins: player.wins, rematchReady: player.rematchReady });
   }
   return {
     id: room.id,
@@ -37,6 +37,7 @@ function resetRoom(room: Room) {
   room.submissions.clear();
   room.graceTimerStarted = false;
   room.firstCorrectAt = null;
+  for (const p of room.players.values()) p.rematchReady = false;
 }
 
 function applyWins(room: Room, winnerColor: PlayerColor | null) {
@@ -139,11 +140,15 @@ app.prepare().then(() => {
         if (cb) cb({ success: false, error: 'Room not found' });
         return;
       }
-      if (room.state !== 'waiting') {
+      if (room.state === 'countdown' || room.state === 'playing') {
         if (cb) cb({ success: false, error: 'Battle already started' });
         return;
       }
-      if (room.players.size >= room.maxPlayers) {
+      if (room.state === 'ended' && room.players.size >= room.maxPlayers) {
+        if (cb) cb({ success: false, error: 'Room is full (max 2 players)' });
+        return;
+      }
+      if (room.state === 'waiting' && room.players.size >= room.maxPlayers) {
         if (cb) cb({ success: false, error: 'Room is full (max 2 players)' });
         return;
       }
@@ -153,7 +158,7 @@ app.prepare().then(() => {
       const color = colors.find((c) => !usedColors.has(c))!;
       const name = payload.name?.trim() || (color === 'blue' ? 'Blue Wizard' : 'Red Wizard');
 
-      const player = { socketId: socket.id, color, name, joinedAt: Date.now(), wins: 0 };
+      const player = { socketId: socket.id, color, name, joinedAt: Date.now(), wins: 0, rematchReady: false };
       room.players.set(socket.id, player);
       socket.data.roomId = room.id;
       socket.data.role = 'player';
@@ -164,7 +169,12 @@ app.prepare().then(() => {
       io.to(room.id).emit('room:update', roomToPayload(room));
       console.log(`[room ${room.id}] ${color} joined: ${socket.id}`);
 
-      if (room.players.size >= room.maxPlayers) {
+      if (room.state === 'ended') {
+        resetRoom(room);
+        io.to(room.id).emit('room:update', roomToPayload(room));
+      }
+
+      if (room.players.size >= room.maxPlayers && room.state === 'waiting') {
         console.log(`[room ${room.id}] both ready — auto-starting in 2s`);
         setTimeout(() => {
           const r = getRoom(room.id);
@@ -256,20 +266,40 @@ app.prepare().then(() => {
       }
     });
 
-    socket.on('player:reset', (payload: { roomId: string }) => {
+    socket.on('player:reset', (payload: { roomId: string }, cb?: (result: { success: boolean; error?: string }) => void) => {
       const room = getRoom(payload.roomId);
-      if (!room || room.state !== 'ended') return;
+      if (!room || room.state !== 'ended') {
+        if (cb) cb({ success: false, error: 'No active battle to reset' });
+        return;
+      }
 
-      resetRoom(room);
-      io.to(room.id).emit('room:update', roomToPayload(room));
-      console.log(`[room ${room.id}] battle reset for rematch`);
+      const player = room.players.get(socket.id);
+      if (!player) {
+        if (cb) cb({ success: false, error: 'Too late — another wizard took your place' });
+        return;
+      }
 
-      if (room.players.size >= room.maxPlayers) {
+      player.rematchReady = true;
+      console.log(`[room ${room.id}] ${player.color} ready for rematch`);
+
+      const allReady = Array.from(room.players.values()).every((p) => p.rematchReady);
+
+      if (allReady) {
+        resetRoom(room);
+        io.to(room.id).emit('room:update', roomToPayload(room));
+        console.log(`[room ${room.id}] rematch — countdown in 2s`);
         setTimeout(() => {
           const r = getRoom(room.id);
           if (r && r.state === 'waiting') startBattle(io, r);
         }, 2000);
+      } else {
+        io.to(room.id).emit('room:update', roomToPayload(room));
+        const waitingFor = Array.from(room.players.values()).filter((p) => !p.rematchReady);
+        io.to(room.id).emit('rematch:waiting', { waitingFor: waitingFor.map((p) => p.color) });
+        console.log(`[room ${room.id}] waiting for rematch: ${waitingFor.map((p) => p.color).join(', ')}`);
       }
+
+      if (cb) cb({ success: true });
     });
 
     socket.on('player:exit', (payload: { roomId: string }) => {
