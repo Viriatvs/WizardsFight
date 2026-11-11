@@ -6,8 +6,13 @@ import { useSearchParams } from 'next/navigation';
 import Countdown from '@/components/Countdown';
 import SpellInput from '@/components/SpellInput';
 import ChoiceInput from '@/components/ChoiceInput';
+import PhoneResult from '@/components/PhoneResult';
 import { MODE_LABELS } from '@/lib/modes';
-import type { PlayerColor, GamePhase, BattleMode, SpellReveal } from '@/types/game';
+import { roundLabel } from '@/lib/game';
+import type { PlayerColor, GamePhase, BattleMode, SpellReveal, GameInfo, BattleEnd } from '@/types/game';
+
+/** Where to send visitors of a room that no longer exists. The start page shows a notice for it. */
+const ROOM_EXPIRED_URL = '/?expired=1';
 
 /** What SpellInput shows for the typing modes; null for the choice modes. */
 function typingDisplay(reveal: SpellReveal, memorizeHidden: boolean) {
@@ -41,7 +46,11 @@ export default function PlayPage({ params }: { params: Promise<{ room: string }>
   const [fightReady, setFightReady] = useState(false);
   const [bothReady, setBothReady] = useState(false);
   const [playerCount, setPlayerCount] = useState(0);
-  const [wins, setWins] = useState(0);
+  const [game, setGame] = useState<GameInfo | null>(null);
+  /** This player pressed Next round / Fight again and waits for the opponent. */
+  const [continueReady, setContinueReady] = useState(false);
+  /** e.g. "Morgana left the room", shown on the waiting screen. */
+  const [notice, setNotice] = useState<string | null>(null);
   const [countdown, setCountdown] = useState<number | null>(null);
   const [showFight, setShowFight] = useState(false);
   const [mode, setMode] = useState<BattleMode | null>(null);
@@ -52,28 +61,28 @@ export default function PlayPage({ params }: { params: Promise<{ room: string }>
   const [submitted, setSubmitted] = useState<{ correct: boolean; durationMs: number } | null>(null);
   const [graceSeconds, setGraceSeconds] = useState<number | null>(null);
   const graceTimerRef = useRef<ReturnType<typeof setInterval>>();
-  const [battleEnd, setBattleEnd] = useState<{
-    winnerColor: string | null;
-    winnerName: string | null;
-    durationMs: number | null;
-    results: Record<string, { color: string; name: string; durationMs: number; correct: boolean }>;
-    timedOut?: boolean;
-    graceTimeout?: boolean;
-    allWrong?: boolean;
-  } | null>(null);
+  const [battleEnd, setBattleEnd] = useState<BattleEnd | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     const socket = io({ path: '/socket.io' });
     socketRef.current = socket;
 
+    // Also runs on every reconnect, e.g. after a server restart wiped the room.
     socket.on('connect', () => {
-      setPhase('name');
+      socket.emit('room:check', { roomId }, (res: { exists: boolean }) => {
+        if (!res.exists) return window.location.replace(ROOM_EXPIRED_URL);
+        setPhase('name');
+      });
     });
 
-    socket.on('room:update', (data: { state: string; mode: BattleMode | null; players: Array<{ color: string; wins: number; fightReady: boolean }> }) => {
+    socket.on('room:update', (data: { state: string; mode: BattleMode | null; game: GameInfo; players: Array<{ color: string; fightReady: boolean; rematchReady: boolean }> }) => {
       setMode(data.mode);
-      if (data.state === 'countdown') setPhase('countdown');
+      setGame(data.game);
+      if (data.state === 'countdown') {
+        setPhase('countdown');
+        setNotice(null);
+      }
       if (data.state === 'playing') setPhase('spell');
       if (data.state === 'waiting') {
         setPhase('waiting');
@@ -86,8 +95,8 @@ export default function PlayPage({ params }: { params: Promise<{ room: string }>
       }
       const me = data.players.find((p) => p.color === colorRef.current);
       if (me) {
-        setWins(me.wins);
         setFightReady(me.fightReady);
+        setContinueReady(me.rematchReady);
       }
       setPlayerCount(data.players.length);
       setBothReady(
@@ -150,13 +159,17 @@ export default function PlayPage({ params }: { params: Promise<{ room: string }>
       }, 1000);
     });
 
-    socket.on('battle:end', (data: typeof battleEnd & { wins?: Record<string, number> }) => {
+    socket.on('battle:end', (data: BattleEnd) => {
       setCountdown(null);
       setGraceSeconds(null);
       if (graceTimerRef.current) clearInterval(graceTimerRef.current);
-      if (data.wins && colorRef.current) setWins(data.wins[colorRef.current] ?? 0);
+      setGame(data.game);
       setBattleEnd(data);
       setPhase('ended');
+    });
+
+    socket.on('player:disconnected', (data: { name: string }) => {
+      setNotice(`${data.name} left the room`);
     });
 
     socket.on('error', (data: { message: string }) => {
@@ -174,7 +187,8 @@ export default function PlayPage({ params }: { params: Promise<{ room: string }>
   const submitName = useCallback(() => {
     const trimmed = name.trim();
     if (!trimmed) return;
-    socketRef.current?.emit('room:join', { roomId, name: trimmed, color: preferredColor || undefined }, (res: { success: boolean; color?: PlayerColor; error?: string }) => {
+    socketRef.current?.emit('room:join', { roomId, name: trimmed, color: preferredColor || undefined }, (res: { success: boolean; color?: PlayerColor; error?: string; notFound?: boolean }) => {
+      if (res.notFound) return window.location.replace(ROOM_EXPIRED_URL);
       if (res.success && res.color) {
         colorRef.current = res.color;
         setColor(res.color);
@@ -197,12 +211,30 @@ export default function PlayPage({ params }: { params: Promise<{ room: string }>
     socketRef.current?.emit('spell:submit', { roomId, text });
   }, [roomId]);
 
+  // Next round (game going on) or Fight again (game over). The server starts once both pressed.
+  const pressContinue = useCallback(() => {
+    setError(null);
+    setContinueReady(true);
+    socketRef.current?.emit('player:reset', { roomId }, (res: { success: boolean; error?: string }) => {
+      if (res.success) return;
+      setContinueReady(false);
+      setError(res.error || 'Could not continue');
+    });
+  }, [roomId]);
+
+  const exitRoom = useCallback(() => {
+    socketRef.current?.emit('player:exit', { roomId });
+    window.location.href = '/';
+  }, [roomId]);
+
   const colorClass = color === 'blue' ? 'text-blue-400' : color === 'red' ? 'text-red-400' : 'text-gray-400';
   const colorBg = color === 'blue' ? 'bg-blue-500/10 border-blue-500' : color === 'red' ? 'bg-red-500/10 border-red-500' : 'bg-gray-500/10 border-gray-500';
 
   return (
     <main className="flex-1 flex flex-col items-center justify-center min-h-screen px-4 py-6">
-      {countdown !== null && <Countdown seconds={countdown} label={mode ? MODE_LABELS[mode] : undefined} />}
+      {countdown !== null && (
+        <Countdown seconds={countdown} label={game && mode ? `${roundLabel(game.round)} · ${MODE_LABELS[mode]}` : undefined} />
+      )}
 
       {showFight && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm">
@@ -231,8 +263,10 @@ export default function PlayPage({ params }: { params: Promise<{ room: string }>
               </span>
             </div>
           )}
-          {mode && (phase === 'countdown' || phase === 'spell') && (
-            <div className="mt-2 text-amber-400 text-sm font-bold uppercase tracking-widest">Mode: {MODE_LABELS[mode]}</div>
+          {mode && game && (phase === 'countdown' || phase === 'spell') && (
+            <div className="mt-2 text-amber-400 text-sm font-bold uppercase tracking-widest">
+              {roundLabel(game.round)} · {MODE_LABELS[mode]}
+            </div>
           )}
         </div>
 
@@ -295,6 +329,7 @@ export default function PlayPage({ params }: { params: Promise<{ room: string }>
                 </p>
               </div>
             )}
+            {notice && <p role="status" className="text-amber-300 text-sm mt-4">{notice}. A new opponent can join with the QR code.</p>}
             {error && <p role="alert" className="text-red-400 text-sm mt-4">{error}</p>}
           </div>
         )}
@@ -322,74 +357,19 @@ export default function PlayPage({ params }: { params: Promise<{ room: string }>
           />
         )}
 
-        {battleEnd && (
-          <div className="text-center py-8">
-            {battleEnd.timedOut || !battleEnd.winnerColor ? (
-              <>
-                <div className="text-5xl mb-4">💀</div>
-                <div className="text-3xl font-black text-gray-400">DRAW</div>
-                <p className="text-gray-500 mt-2">{battleEnd.allWrong ? 'Both wizards chose wrong' : 'No valid spell cast'}</p>
-              </>
-            ) : (
-              <>
-                <img
-                  src={battleEnd.winnerColor === 'blue' ? '/images/victory-blue-wizard.gif' : '/images/victory-red-wizard.gif'}
-                  alt={`${battleEnd.winnerColor} wizard victory`}
-                  className="fixed inset-0 w-full h-full object-cover -z-10"
-                />
-                <div className={`text-4xl font-black ${battleEnd.winnerColor === 'blue' ? 'text-blue-400' : 'text-red-400'}`}>
-                  {battleEnd.winnerColor === 'blue' ? 'BLUE' : 'RED'} WINS!
-                </div>
-                <p className="text-gray-300 text-xl mt-2">{battleEnd.winnerName}</p>
-                {color === battleEnd.winnerColor && (
-                  <div className="text-amber-400 text-2xl font-bold mt-4 animate-bounce">
-                    🎉 YOU WIN! 🎉
-                  </div>
-                )}
-                {color !== battleEnd.winnerColor && (
-                  <div className="text-gray-500 text-lg mt-4">Better luck next time…</div>
-                )}
-                {battleEnd.durationMs !== null && (
-                  <div className="text-gray-400 font-mono mt-3">⚡ {battleEnd.durationMs.toLocaleString()} ms</div>
-                )}
-                {battleEnd.graceTimeout && (
-                  <p className="text-gray-400 text-sm mt-2">Opponent did not cast in time</p>
-                )}
-              </>
-            )}
-
-            {wins > 0 && (
-              <div className="mt-6 text-center">
-                <span className={`text-5xl font-black ${colorClass}`}>🏆 {wins}</span>
-                <div className="text-gray-400 text-sm mt-1 uppercase tracking-wider">consecutive win{wins > 1 ? 's' : ''}</div>
-              </div>
-            )}
-
-            <div className="mt-8 flex gap-4 justify-center">
-              <button
-                onClick={() => {
-                  socketRef.current?.emit('player:reset', { roomId }, (res: { success: boolean; error?: string }) => {
-                    if (!res.success) {
-                      setError(res.error || 'Cannot join rematch');
-                      setTimeout(() => setError(null), 5000);
-                    }
-                  });
-                }}
-                className="px-8 py-3 bg-amber-600 hover:bg-amber-500 text-white font-bold rounded-xl transition-colors"
-              >
-                ⚔️ Battle Again
-              </button>
-              <button
-                onClick={() => { socketRef.current?.emit('player:exit', { roomId }); window.location.href = '/'; }}
-                className="px-8 py-3 bg-gray-700 hover:bg-gray-600 text-white font-bold rounded-xl transition-colors"
-              >
-                Exit
-              </button>
-            </div>
-          </div>
+        {battleEnd && phase === 'ended' && (
+          <PhoneResult
+            end={battleEnd}
+            myColor={color}
+            waiting={continueReady}
+            opponentPresent={playerCount >= 2}
+            onContinue={pressContinue}
+            onExit={exitRoom}
+            error={error}
+          />
         )}
 
-        {error && phase === 'ended' && (
+        {error && phase === 'ended' && !battleEnd && (
           <div className="text-center py-8">
             <div className="text-3xl mb-4">⚠️</div>
             <p className="text-red-400 text-lg font-medium">{error}</p>

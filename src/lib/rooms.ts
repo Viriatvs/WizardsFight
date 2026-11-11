@@ -20,6 +20,7 @@ export function createRoom(hostSocketId: string): Room {
     round: 0,
     mode: null,
     lockedOut: new Set(),
+    roundResults: [],
   };
   rooms.set(id, room);
   return room;
@@ -31,8 +32,29 @@ export function getRoom(id: string): Room | undefined {
 
 export function deleteRoom(id: string): void {
   rooms.delete(id);
+  emptySince.delete(id);
 }
 
-export function allRooms(): Room[] {
-  return Array.from(rooms.values());
+/** Room id → when we first saw it with no screen (host or phone) connected. */
+const emptySince = new Map<string, number>();
+
+/**
+ * Deletes rooms that have had no connected screen for `abandonedAfterMs`.
+ * Call it periodically; returns the ids it deleted.
+ */
+export function sweepAbandonedRooms(connectedCount: (roomId: string) => number, abandonedAfterMs: number, now = Date.now()): string[] {
+  const deleted: string[] = [];
+  for (const id of rooms.keys()) {
+    if (connectedCount(id) > 0) {
+      emptySince.delete(id);
+      continue;
+    }
+    const since = emptySince.get(id) ?? now;
+    emptySince.set(id, since);
+    if (now - since >= abandonedAfterMs) {
+      deleteRoom(id);
+      deleted.push(id);
+    }
+  }
+  return deleted;
 }

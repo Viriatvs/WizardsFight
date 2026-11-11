@@ -1,10 +1,16 @@
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { io, Socket } from 'socket.io-client';
 
 export default function LandingPage() {
   const [loading, setLoading] = useState(false);
+  // Set when a battle/play page redirected here because its room no longer exists.
+  const [expired, setExpired] = useState(false);
+
+  useEffect(() => {
+    setExpired(new URLSearchParams(window.location.search).has('expired'));
+  }, []);
 
   const startFight = useCallback(() => {
     setLoading(true);
@@ -53,6 +59,12 @@ export default function LandingPage() {
           <p>🖥️ One screen hosts the battle</p>
           <p>🌍 Spells in <em className="text-amber-300">Latin</em></p>
         </div>
+
+        {expired && (
+          <p role="status" className="mb-6 mx-auto max-w-sm px-4 py-3 rounded-xl border border-amber-500/40 bg-amber-500/10 text-amber-200 text-sm">
+            That battle has ended or no longer exists. Start a new fight below.
+          </p>
+        )}
 
         <button
           onClick={startFight}

@@ -4,14 +4,15 @@ Read this file before working on the project. It describes the code as it is now
 
 ## Idea
 
-A real-time spell-casting duel for two players.
+A real-time spell-casting duel for two players. **Core idea: the game is opened in a browser on a main screen (laptop/TV), players join by scanning its QR code and play on their phones, and the main screen shows the result of every round and of the game.**
 
-1. A **host screen** (laptop/TV) creates a battle room and shows a QR code.
+1. The **host (main) screen** creates a battle room and shows a QR code.
 2. Two players scan the QR with their **phones**. Each enters a wizard name and gets a color, **blue** or **red**.
-3. Both players press **Let's Fight**. Every screen then shows the round's **mode** and a countdown (3, 2, 1, FIGHT!).
-4. Both phones get the same Latin spell, presented according to the mode (see "Battle modes").
-5. The fastest **correct** answer wins. The host screen shows a victory animation, and the phones show the result plus each player's win streak.
-6. Either player can start a rematch from their phone.
+3. Both players press **Let's Fight**. A **game** starts: best of 3 rounds (see "Games and rounds").
+4. Every round, every screen shows the round number and the round's **mode**, then a countdown (3, 2, 1, FIGHT!).
+5. Both phones get the same Latin spell, presented according to the mode (see "Battle modes"). The fastest **correct** answer wins the round.
+6. The main screen shows the winner animation with the winner's name, then the score. The phones show the result and a **Next round** button.
+7. When the game is decided, the main screen shows the game winner, then returns to the waiting room. The phones show the animation, a side-by-side score table, and **Fight again** / **Exit**.
 
 Credits (landing page footer): created by MOSORIO, based on an idea by HREYNOLDS.
 
@@ -27,7 +28,7 @@ Credits (landing page footer): created by MOSORIO, based on an idea by HREYNOLDS
 | QR code | `qrcode` (generated client-side as a data URL) |
 | Styling | Tailwind CSS 3, plus custom keyframes and classes in `src/app/globals.css` |
 | Lint | ESLint 9 with `next/core-web-vitals` |
-| Tests | Node's built-in test runner via `tsx --test` (`src/lib/modes.test.ts`) |
+| Tests | Node's built-in test runner via `tsx --test` (`src/lib/*.test.ts`) |
 
 The app has no REST API routes. All client/server communication goes through Socket.IO events.
 
@@ -59,8 +60,10 @@ Env: `PORT` (default 3000; 10000 on Render). `NODE_ENV` switches Next between de
 spells.md                  THE spell list (edited by humans): ## Category headings + | Latin | English | Description | tables
 server.ts                  HTTP server: Next request handler + Socket.IO server + all game logic/timers
 src/
-  types/game.ts            Room, Player, Submission, SpellData, RoomState, PlayerColor, GamePhase
-  lib/rooms.ts             In-memory room store: createRoom / getRoom / deleteRoom
+  types/game.ts            Room, Player, Submission, SpellData, RoomState, PlayerColor, GamePhase, SpellReveal,
+                           RoundResults, GameScore, GameInfo, BattleEnd (shared payload types)
+  lib/game.ts              Game rules: gameScore, gameWinner (best of 3 + extra rounds), roundLabel (+ game.test.ts)
+  lib/rooms.ts             In-memory room store: createRoom / getRoom / deleteRoom / sweepAbandonedRooms (+ rooms.test.ts)
   lib/spells.ts            Server-only: parses /spells.md at startup + randomSpell(excludeLatin)
   lib/scoring.ts           normalizeSpell, validateSubmission, determineWinner
   lib/modes.ts             Battle modes: MODES, MODE_LABELS, randomMode, buildChoices, maskSpell, revealRandomLetter (pure, shared)
@@ -70,8 +73,11 @@ src/
   app/battle/[room]/page.tsx  HOST screen
   app/play/[room]/page.tsx    PLAYER (phone) screen
   app/not-found.tsx
-  components/              BattleImage, QRPanel, PlayerCard, Countdown (optional mode label), VictoryAnimation,
-                           SpellInput (typing modes: full spell / letter slots / memorize phase), ChoiceInput (4 options)
+  components/              BattleImage, QRPanel, PlayerCard, Countdown (optional round/mode label),
+                           VictoryAnimation (host overlay: player's name as headline over the GIF),
+                           SpellInput (typing modes: full spell / letter slots / memorize phase), ChoiceInput (4 options),
+                           ScoreTable (Blue vs Red: won/lost/draws + per-round chips),
+                           PhoneResult (phone screen after a round or game)
 public/images/             Battlefield scenes (empty / blue ready / red ready / both) + victory GIFs per color
 ```
 
@@ -80,7 +86,8 @@ The server is authoritative. Pages are `'use client'`. Each page opens its own S
 ### Room model (`src/types/game.ts`)
 
 - `state`: `'waiting' | 'countdown' | 'playing' | 'ended'`
-- `players`: `Map<socketId, Player>`. Max 2. A `Player` has `color`, `name`, `wins` (current win streak), `fightReady`, and `rematchReady`.
+- `players`: `Map<socketId, Player>`. Max 2. A `Player` has `color`, `name`, `fightReady` (Let's Fight), and `rematchReady` (Next round / Fight again).
+- `roundResults`: the current game's finished rounds, as `(PlayerColor | null)[]` (null = draw). Payloads carry it as `game: GameInfo` = `{round, results, score, winner}`.
 - `submissions`: `Map<socketId, Submission>`. Holds **correct** casts only.
 - `spell`, `mode`. Both are kept across `resetRoom` so the next round can avoid repeating them.
 - `lockedOut`: `Set<socketId>` of players who picked a wrong option this round (Translate/Describe).
@@ -96,7 +103,12 @@ The server is authoritative. Pages are `'use client'`. Each page opens its own S
 - Shows `BattleImage`. The scene image changes as players join.
 - Shows a QR code for `<origin>/play/:room`.
 - Shows two `PlayerCard`s. While a slot is empty, its card links to `/play/:room?color=blue|red` in a new tab. This is handy for testing both players on one machine.
-- Listens for `room:update`, `countdown`, `fight`, `spell:reveal`, `battle:end`, and `player:disconnected`, then renders the countdown overlay, FIGHT!, and `VictoryAnimation` (winner GIF, name, ms) or DRAW.
+- Listens for `room:update`, `countdown`, `fight`, `spell:reveal`, `battle:end`, and `player:disconnected`.
+- Shows the countdown overlay with "Round N · Mode", then FIGHT!, then "Battle in progress — Round N · Mode".
+- On `battle:end`, plays `VictoryAnimation` for `ANIMATION_MS` (5 s). The headline is the player's typed name; draws show DRAW. Then:
+  - **game goes on:** a full-screen scoreboard (`ScoreTable`, large) stays until the next round's countdown;
+  - **game over:** back to the normal waiting room, with a "Last game: X won 2 – 1" banner.
+- PlayerCards show each player's round wins in the current game.
 
 ### 3. Player joins (`/play/:room`)
 Phone phases (`GamePhase`): `connecting → name → waiting → countdown → spell → ended`.
@@ -133,32 +145,46 @@ Time is always measured on the server: `durationMs = serverNow - spellRevealedAt
 - `spell:submitted {correct, durationMs, lockedOut?}` goes only to the player who answered. Typing modes clear a wrong result after 2 s so the player can retry. A locked-out player keeps the wrong state.
 - `limitMs` (on reveal, `spell:hint` or `spell:hide`) lets the phone show a "seconds left" counter. The phone turns it into a local deadline, so client and server clocks don't need to match.
 
-### 6. Battle end (`battle:end`)
-Every way a round ends goes through `endBattle(io, room, winner, extra)` in `server.ts`. It ignores the call if the round already ended, so timers and answers can't end a round twice. Besides the mode rules above, a player who disconnects while `playing` loses: the other player wins with `forfeit: true`.
+### 6. Round end (`battle:end`)
+Every way a round ends goes through `endBattle(io, room, winner, extra)` in `server.ts`. It records the round in `roundResults` and ignores the call if the round already ended, so timers and answers can't end a round twice. Besides the mode rules above, a player who leaves while `playing` loses the round (`forfeit: true`).
 
-Payload: `{winnerColor, winnerName, durationMs, results: {[socketId]: {color,name,durationMs,correct,wins}}, wins: {blue,red}, timedOut?, graceTimeout?, allWrong?, forfeit?}`. `durationMs` in `results` is -1 when that player has no correct answer.
+Payload (`BattleEnd` type): `{winnerColor, winnerName, durationMs, results: {[socketId]: {color,name,durationMs,correct}}, game: GameInfo, timedOut?, graceTimeout?, allWrong?, forfeit?}`. `durationMs` in `results` is -1 when that player has no correct answer. `results` also gives both names for the score table.
 
-Win streaks (`applyWins`): the winner gets `wins++`. Everyone else, and both players on a draw, resets to 0.
+### 7. Games and rounds (`src/lib/game.ts`)
+- **Best of 3:** the game ends as soon as a player has **2 round wins**. If 3 rounds have been played and the score is level (e.g. win, draw, loss, or 3 draws), **extra rounds** follow until one player is ahead. Draws count as rounds played. `gameWinner(results)` returns the winner or null while the game goes on.
+- `roundLabel(n)`: "Round 2", or "Round 4 · Extra round" past round 3.
+- **Phone after a round** (`PhoneResult`): who won the round, ms, the score table, and **Next round** / **Exit**.
+- **Phone after the game:** the victory GIF fitted to the phone (`object-contain`) with the game winner's name over it, "You win the game!" or "You lost the game", the side-by-side `ScoreTable` (won / lost / draws per player + one chip per round), and **Fight again** / **Exit**.
+- **Next round** and **Fight again** both emit `player:reset` (`rematchReady`). When all players pressed it:
+  - the room resets to `waiting` with every player's `fightReady = true`, so screens show "battle starting", not Let's Fight;
+  - after a game over, `roundResults` is cleared first (new game at 0–0);
+  - the next round starts after 2 s.
+  
+  While the opponent hasn't pressed yet, the server emits `rematch:waiting {waitingFor}`.
 
-### 7. Rematch / exit
-- **Battle Again** (phone) emits `player:reset`, which sets `rematchReady`. When all players are ready, the room resets to `waiting` and the battle starts after 2 s. Players don't need to press Let's Fight again. If someone is still missing, the server emits `rematch:waiting {waitingFor}`.
-- **Exit** (phone) emits `player:exit`. The server removes the player, emits `player:disconnected` and `room:update`, and the phone goes to `/`.
-- On socket `disconnect`, a player is removed (with a forfeit if the battle is `playing`).
-- When the last player leaves a room, the server deletes the room after **30 s** if it is still empty.
+### 8. Leaving
+- **Exit** (phone) emits `player:exit`, then the phone goes to `/`. A socket `disconnect` does the same. Both go through `removePlayer()`:
+  - while `playing`: the other player wins the round by forfeit;
+  - **mid-game** (game not decided): the game is cancelled. `roundResults` is cleared and the room goes back to `waiting`, so the remaining phone shows "X left the room" and waits for a new opponent;
+  - **after the game is over:** nothing is reset, so the other phone keeps its final table. Its Fight again then returns it to waiting for a new opponent. A new player joining an `ended` room starts a fresh game.
+- If a player leaves during the countdown, the countdown stops (the room is no longer in `countdown`).
+- **Abandoned rooms:** every minute the server runs `sweepAbandonedRooms` (rooms.ts). It deletes rooms that have had **no connected screen (host or phone) for 10 minutes** (`ROOM_ABANDONED_MS`). A room stays alive as long as its host screen is open, even with no players.
+- **Missing rooms redirect:** `/play/:room` emits `room:check` on every (re)connect, and `/battle/:room` gets `notFound` from `room:watch`. If the room no longer exists (abandoned, or wiped by a restart or deploy), the page redirects to `/?expired=1`. There the start page shows "That battle has ended or no longer exists".
 
 ### Socket events
 
 | Event | Direction | Payload |
 |---|---|---|
 | `room:create` | landing → server | ack `{roomId}` |
-| `room:watch` | host → server | `{roomId}`, ack `{success, data?, error?}` |
-| `room:join` | phone → server | `{roomId, name?, color?}`, ack `{success, color?, error?}` |
+| `room:check` | phone → server | `{roomId}`, ack `{exists}` |
+| `room:watch` | host → server | `{roomId}`, ack `{success, data?, error?, notFound?}` |
+| `room:join` | phone → server | `{roomId, name?, color?}`, ack `{success, color?, error?, notFound?}` |
 | `player:name` | phone → server | `{roomId, name}` (rename; not currently used by the UI) |
 | `player:ready` | phone → server | `{roomId}` (Let's Fight) |
 | `spell:submit` | phone → server | `{roomId, text}` |
-| `player:reset` | phone → server | `{roomId}` (rematch) |
+| `player:reset` | phone → server | `{roomId}` (Next round / Fight again) |
 | `player:exit` | phone → server | `{roomId}` |
-| `room:update` | server → room | `{id, state, mode, players[{color,name,socketId,wins,rematchReady,fightReady}], playerCount, maxPlayers, spellRevealedAt, startedAt}`. `mode` is null while waiting. |
+| `room:update` | server → room | `{id, state, mode, players[{color,name,socketId,rematchReady,fightReady}], playerCount, maxPlayers, spellRevealedAt, startedAt, game: GameInfo}`. `mode` is null while waiting. |
 | `countdown` | server → room | `{seconds}` |
 | `fight` | server → room | `{text:'FIGHT'}` |
 | `spell:reveal` | server → room | `SpellReveal` (per mode, see §5) |
@@ -175,7 +201,7 @@ If you add or change an event, update both the server handler in `server.ts` and
 ## Conventions
 
 - **Spells** live in `/spells.md`, not in code. `src/lib/spells.ts` reads that file once when the server starts, so changes need a restart or deploy. The Latin may contain only letters and spaces, because players type it exactly. If a row is invalid, the server refuses to start and names the line. `spells.ts` uses `fs`, so never import it from client components.
-- **Timing constants:** the mode timings are named constants at the top of `server.ts` (`TYPE_LIMIT_MS`, `GRACE_MS`, `CHOICE_LIMIT_MS`, `HANGMAN_*`, `MEMORIZE_*`). The 2 s pre-battle delay and the 30 s empty-room cleanup are still written inline.
+- **Timing constants:** the mode timings are named constants at the top of `server.ts` (`TYPE_LIMIT_MS`, `GRACE_MS`, `CHOICE_LIMIT_MS`, `HANGMAN_*`, `MEMORIZE_*`, `ROOM_ABANDONED_MS`, `ROOM_SWEEP_INTERVAL_MS`). The 2 s pre-battle delay is still written inline.
 - **Adding a mode:** add it to `BattleMode` and `SpellReveal` (types), `MODES`/`MODE_LABELS` (modes.ts), a `case` in `revealSpell()` and the answer rules in the `spell:submit` handler (server.ts), and the phone UI in `play/[room]/page.tsx`. Then document it in §5.
 - **Colors:** blue = Tailwind `blue-400/500`, red = `red-400/500`, accent = `amber-*`, background `#0a0a1a`. Animations use the classes in `globals.css` (`animate-countdown`, `battle-text`, `spell-glow`, `animate-shake`, `confetti-piece`, `btn-fight`, …).
 - **Path alias:** `@/*` → `src/*`. `tsx` resolves it for `server.ts` too.

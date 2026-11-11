@@ -2,6 +2,39 @@ export type RoomState = 'waiting' | 'countdown' | 'playing' | 'ended';
 export type PlayerColor = 'blue' | 'red';
 export type BattleMode = 'type' | 'translate' | 'describe' | 'hangman' | 'memorize';
 
+/** One entry per finished round of the current game: the winner's color, or null for a draw. */
+export type RoundResults = Array<PlayerColor | null>;
+
+export interface GameScore {
+  blue: number;
+  red: number;
+  draws: number;
+}
+
+/** Sent with room:update and battle:end so every screen can show the round and score. */
+export interface GameInfo {
+  /** Current round number (1-based): the one being played, or the one that just ended. */
+  round: number;
+  results: RoundResults;
+  score: GameScore;
+  /** Game winner once the game is over, otherwise null. */
+  winner: PlayerColor | null;
+}
+
+/** battle:end payload: one round's result plus the game state after it. */
+export interface BattleEnd {
+  winnerColor: PlayerColor | null;
+  winnerName: string | null;
+  durationMs: number | null;
+  /** Per player (keyed by socket id). Also the source of both names for the score table. */
+  results: Record<string, { color: PlayerColor; name: string; durationMs: number; correct: boolean }>;
+  game: GameInfo;
+  timedOut?: boolean;
+  graceTimeout?: boolean;
+  allWrong?: boolean;
+  forfeit?: boolean;
+}
+
 /**
  * What the phones receive when a round starts. Each mode only gets what it must show,
  * so the answer never reaches a phone early (except memorize, which shows it for a few seconds).
@@ -18,7 +51,6 @@ export interface Player {
   color: PlayerColor;
   name: string;
   joinedAt: number;
-  wins: number;
   rematchReady: boolean;
   fightReady: boolean;
 }
@@ -49,6 +81,8 @@ export interface Room {
   mode: BattleMode | null;
   /** Translate/describe: players who picked a wrong option this round. */
   lockedOut: Set<string>;
+  /** Results of the current game's finished rounds. Cleared when a new game starts or is cancelled. */
+  roundResults: RoundResults;
 }
 
 export interface SpellData {

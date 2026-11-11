@@ -1,11 +1,12 @@
 import http from 'http';
 import next from 'next';
 import { Server, Socket } from 'socket.io';
-import { createRoom, getRoom, deleteRoom } from './src/lib/rooms';
+import { createRoom, getRoom, sweepAbandonedRooms } from './src/lib/rooms';
 import { randomSpell, SPELLS } from './src/lib/spells';
 import { validateSubmission, determineWinner } from './src/lib/scoring';
 import { randomMode, buildChoices, maskSpell, revealRandomLetter } from './src/lib/modes';
-import type { Room, Player, PlayerColor, Submission, SpellReveal } from './src/types/game';
+import { gameScore, gameWinner } from './src/lib/game';
+import type { Room, Player, PlayerColor, Submission, SpellReveal, GameInfo, BattleEnd } from './src/types/game';
 
 const dev = process.env.NODE_ENV !== 'production';
 const port = parseInt(process.env.PORT || '3000', 10);
@@ -18,14 +19,22 @@ const HANGMAN_STEP_MS = 1000;
 const HANGMAN_AFTER_FULL_MS = 5000;
 const MEMORIZE_SHOW_MS = 5000;
 const MEMORIZE_LIMIT_MS = 10000;
+const ROOM_ABANDONED_MS = 10 * 60 * 1000;
+const ROOM_SWEEP_INTERVAL_MS = 60 * 1000;
 
 const app = next({ dev });
 const handle = app.getRequestHandler();
 
+function gameInfo(room: Room): GameInfo {
+  const results = room.roundResults;
+  const inRound = room.state === 'countdown' || room.state === 'playing';
+  return { round: results.length + (inRound ? 1 : 0), results, score: gameScore(results), winner: gameWinner(results) };
+}
+
 function roomToPayload(room: Room) {
-  const players: Array<{ color: string; name: string; socketId: string; wins: number; rematchReady: boolean; fightReady: boolean }> = [];
+  const players: Array<{ color: string; name: string; socketId: string; rematchReady: boolean; fightReady: boolean }> = [];
   for (const player of room.players.values()) {
-    players.push({ color: player.color, name: player.name, socketId: player.socketId, wins: player.wins, rematchReady: player.rematchReady, fightReady: player.fightReady });
+    players.push({ color: player.color, name: player.name, socketId: player.socketId, rematchReady: player.rematchReady, fightReady: player.fightReady });
   }
   // Never include the spell here: room:update goes to everyone and would leak the answer.
   return {
@@ -37,6 +46,7 @@ function roomToPayload(room: Room) {
     maxPlayers: room.maxPlayers,
     spellRevealedAt: room.spellRevealedAt,
     startedAt: room.startedAt,
+    game: gameInfo(room),
   };
 }
 
@@ -52,43 +62,49 @@ function resetRoom(room: Room) {
   for (const p of room.players.values()) { p.rematchReady = false; p.fightReady = false; }
 }
 
-function applyWins(room: Room, winnerColor: PlayerColor | null) {
-  for (const player of room.players.values()) {
-    if (winnerColor && player.color === winnerColor) {
-      player.wins++;
-    } else {
-      player.wins = 0;
-    }
-  }
-}
-
-function getWinsPayload(room: Room) {
-  const wins: Record<string, number> = {};
-  for (const player of room.players.values()) {
-    wins[player.color] = player.wins;
-  }
-  return wins;
-}
-
-/** The single way a round ends. Ignored if the round already ended. */
+/** The single way a round ends: records it in the current game. Ignored if the round already ended. */
 function endBattle(io: Server, room: Room, winner: Player | null, extra: Record<string, boolean> = {}) {
   if (room.state !== 'playing') return;
   room.state = 'ended';
-  applyWins(room, winner?.color ?? null);
-  const results: Record<string, { color: PlayerColor; name: string; durationMs: number; correct: boolean; wins: number }> = {};
+  room.roundResults.push(winner?.color ?? null);
+  const results: BattleEnd['results'] = {};
   for (const p of room.players.values()) {
     const sub = room.submissions.get(p.socketId);
-    results[p.socketId] = { color: p.color, name: p.name, durationMs: sub?.durationMs ?? -1, correct: !!sub || p === winner, wins: p.wins };
+    results[p.socketId] = { color: p.color, name: p.name, durationMs: sub?.durationMs ?? -1, correct: !!sub || p === winner };
   }
-  io.to(room.id).emit('battle:end', {
+  const payload: BattleEnd = {
     winnerColor: winner?.color ?? null,
     winnerName: winner?.name ?? null,
     durationMs: winner ? room.submissions.get(winner.socketId)?.durationMs ?? null : null,
     results,
-    wins: getWinsPayload(room),
+    game: gameInfo(room),
     ...extra,
-  });
-  console.log(`[room ${room.id}] ended (${room.mode}), winner: ${winner?.color ?? 'none'} ${JSON.stringify(extra)}`);
+  };
+  io.to(room.id).emit('battle:end', payload);
+  console.log(`[room ${room.id}] round ${payload.game.round} (${room.mode}) winner: ${winner?.color ?? 'none'}, game winner: ${payload.game.winner ?? '-'} ${JSON.stringify(extra)}`);
+}
+
+/**
+ * A player leaves (Exit button or disconnect). Mid-round it's a forfeit. If the game isn't over,
+ * it's cancelled: score cleared and the room goes back to waiting for players.
+ * After a finished game nothing is reset, so the other phone keeps its final score table.
+ */
+function removePlayer(io: Server, room: Room, socketId: string) {
+  const player = room.players.get(socketId);
+  if (!player) return;
+  io.to(room.id).emit('player:disconnected', { color: player.color, name: player.name });
+  if (room.state === 'playing') {
+    const other = Array.from(room.players.values()).find((p) => p.socketId !== socketId) ?? null;
+    endBattle(io, room, other, { forfeit: true });
+  }
+  room.players.delete(socketId);
+  const gameOver = room.state === 'ended' && gameWinner(room.roundResults) !== null;
+  if (!gameOver) {
+    room.roundResults = [];
+    resetRoom(room);
+  }
+  io.to(room.id).emit('room:update', roomToPayload(room));
+  console.log(`[room ${room.id}] ${player.color} left${gameOver ? '' : ' — game cancelled'}`);
 }
 
 /** Runs fn after ms, unless the round has moved on or ended meanwhile. */
@@ -159,6 +175,8 @@ function startBattle(io: Server, room: Room) {
   let step = 0;
 
   const interval = setInterval(() => {
+    // A player left during the countdown (the room went back to waiting): stop.
+    if (room.state !== 'countdown') return clearInterval(interval);
     if (step < sequence.length) {
       io.to(room.id).emit('countdown', { seconds: sequence[step] });
       step++;
@@ -194,10 +212,15 @@ app.prepare().then(() => {
       if (cb) cb({ roomId: room.id });
     });
 
-    socket.on('room:watch', (payload: { roomId: string }, cb?: (result: { success: boolean; data?: ReturnType<typeof roomToPayload>; error?: string }) => void) => {
+    // Lets a page find out whether a room still exists before showing anything.
+    socket.on('room:check', (payload: { roomId: string }, cb?: (result: { exists: boolean }) => void) => {
+      if (cb) cb({ exists: !!getRoom(payload?.roomId) });
+    });
+
+    socket.on('room:watch', (payload: { roomId: string }, cb?: (result: { success: boolean; data?: ReturnType<typeof roomToPayload>; error?: string; notFound?: boolean }) => void) => {
       const room = getRoom(payload.roomId);
       if (!room) {
-        if (cb) cb({ success: false, error: 'Room not found' });
+        if (cb) cb({ success: false, error: 'Room not found', notFound: true });
         return;
       }
       room.hostSocketId = socket.id;
@@ -207,10 +230,10 @@ app.prepare().then(() => {
       if (cb) cb({ success: true, data: roomToPayload(room) });
     });
 
-    socket.on('room:join', (payload: { roomId: string; name?: string; color?: PlayerColor }, cb?: (result: { success: boolean; color?: PlayerColor; error?: string }) => void) => {
+    socket.on('room:join', (payload: { roomId: string; name?: string; color?: PlayerColor }, cb?: (result: { success: boolean; color?: PlayerColor; error?: string; notFound?: boolean }) => void) => {
       const room = getRoom(payload.roomId);
       if (!room) {
-        if (cb) cb({ success: false, error: 'Room not found' });
+        if (cb) cb({ success: false, error: 'Room not found', notFound: true });
         return;
       }
       if (room.state === 'countdown' || room.state === 'playing') {
@@ -240,7 +263,7 @@ app.prepare().then(() => {
       }
       const name = payload.name?.trim() || (color === 'blue' ? 'Blue Wizard' : 'Red Wizard');
 
-      const player = { socketId: socket.id, color, name, joinedAt: Date.now(), wins: 0, rematchReady: false, fightReady: false };
+      const player = { socketId: socket.id, color, name, joinedAt: Date.now(), rematchReady: false, fightReady: false };
       room.players.set(socket.id, player);
       socket.data.roomId = room.id;
       socket.data.role = 'player';
@@ -251,7 +274,9 @@ app.prepare().then(() => {
       io.to(room.id).emit('room:update', roomToPayload(room));
       console.log(`[room ${room.id}] ${color} joined: ${socket.id}`);
 
+      // A new player fills a slot freed after a finished game: a fresh game starts.
       if (room.state === 'ended') {
+        room.roundResults = [];
         resetRoom(room);
         io.to(room.id).emit('room:update', roomToPayload(room));
       }
@@ -369,13 +394,18 @@ app.prepare().then(() => {
         return;
       }
 
+      // Same event for "Next round" (game still going) and "Fight again" (game over: a new game starts at 0-0).
       player.rematchReady = true;
-      console.log(`[room ${room.id}] ${player.color} ready for rematch`);
+      const gameOver = gameWinner(room.roundResults) !== null;
+      console.log(`[room ${room.id}] ${player.color} pressed ${gameOver ? 'Fight again' : 'Next round'}`);
 
       const allReady = Array.from(room.players.values()).every((p) => p.rematchReady);
 
       if (allReady) {
+        if (gameOver) room.roundResults = [];
         resetRoom(room);
+        // Pressing Next round / Fight again already means "ready": screens show "starting" instead of Let's Fight.
+        for (const p of room.players.values()) p.fightReady = true;
         io.to(room.id).emit('room:update', roomToPayload(room));
         console.log(`[room ${room.id}] rematch — countdown in 2s`);
         setTimeout(() => {
@@ -396,62 +426,27 @@ app.prepare().then(() => {
       const room = getRoom(payload.roomId);
       if (!room) return;
 
-      const player = room.players.get(socket.id);
-      if (player) {
-        console.log(`[room ${room.id}] ${player.color} exited`);
-        room.players.delete(socket.id);
-        socket.data.roomId = undefined;
-        socket.data.role = undefined;
-
-        io.to(room.id).emit('player:disconnected', { color: player.color, name: player.name });
-        io.to(room.id).emit('room:update', roomToPayload(room));
-      }
-
-      if (room.players.size === 0 && room.hostSocketId !== socket.id) {
-        setTimeout(() => {
-          const r = getRoom(room.id);
-          if (r && r.players.size === 0) {
-            deleteRoom(room.id);
-            console.log(`[room ${room.id}] deleted (empty)`);
-          }
-        }, 30000);
-      }
+      if (!room.players.has(socket.id)) return;
+      socket.data.roomId = undefined;
+      socket.data.role = undefined;
+      socket.leave(room.id);
+      removePlayer(io, room, socket.id);
     });
 
     socket.on('disconnect', () => {
       const data = socket.data as { roomId?: string; role?: string };
-      if (data?.roomId) {
-        const room = getRoom(data.roomId);
-        if (room) {
-          if (data.role === 'player') {
-            const player = room.players.get(socket.id);
-            if (player) {
-              console.log(`[room ${room.id}] ${player.color} disconnected: ${socket.id}`);
-              io.to(room.id).emit('player:disconnected', { color: player.color, name: player.name });
-
-              if (room.state === 'playing') {
-                const winner = Array.from(room.players.values()).find((p) => p.socketId !== socket.id) ?? null;
-                endBattle(io, room, winner, { forfeit: true });
-              }
-            }
-            room.players.delete(socket.id);
-          }
-
-          io.to(room.id).emit('room:update', roomToPayload(room));
-
-          if (room.players.size === 0 && room.hostSocketId !== socket.id) {
-            setTimeout(() => {
-              const r = getRoom(room.id);
-              if (r && r.players.size === 0) {
-                deleteRoom(room.id);
-                console.log(`[room ${room.id}] deleted (empty)`);
-              }
-            }, 30000);
-          }
-        }
-      }
+      if (data?.role !== 'player' || !data.roomId) return;
+      const room = getRoom(data.roomId);
+      if (room) removePlayer(io, room, socket.id);
     });
   });
+
+  // A room is abandoned once no screen (host or phone) has been connected to it for ROOM_ABANDONED_MS.
+  // Pages that later open it get redirected to the start page.
+  setInterval(() => {
+    const deleted = sweepAbandonedRooms((id) => io.sockets.adapter.rooms.get(id)?.size ?? 0, ROOM_ABANDONED_MS);
+    for (const id of deleted) console.log(`[room ${id}] deleted (abandoned)`);
+  }, ROOM_SWEEP_INTERVAL_MS);
 
   server.listen(port, () => {
     console.log(`Wizards Fight running on http://localhost:${port}`);
