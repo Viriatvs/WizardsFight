@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   MODES, randomMode, buildChoices, maskSpell, revealRandomLetter, CHOICE_COUNT, scramblePuzzle, isSolved,
-  hangmanStart, hangmanNextLetter, matchWords, maskWords, lettersFound, spellWordCount,
+  hangmanStart, hangmanNextLetter, matchWords, lettersFound, spellWordCount, fillWords,
 } from './modes';
 import type { SpellData } from '@/types/game';
 
@@ -86,14 +86,22 @@ test('hangman starts with first letters, then reveals last letters left to right
 
 test('memorize: words count in any position, ignoring case, and add up letters', () => {
   const spell = 'abutres vao cair logo';
+  // What the phone shows: the found words (as the server sends them) on top of the all-underscore mask.
+  const shown = (found: number[]) => fillWords(maskSpell(spell), Object.fromEntries(found.map((i) => [i, spell.split(' ')[i]])));
   let found = matchWords(spell, 'abutres vio fell');
   assert.deepEqual(found, [0]);
-  assert.equal(maskWords(spell, found), 'abutres ___ ____ ____');
+  assert.equal(shown(found), 'abutres ___ ____ ____');
   found = matchWords(spell, 'LOGO', found);
-  assert.equal(maskWords(spell, found), 'abutres ___ ____ logo');
+  assert.equal(shown(found), 'abutres ___ ____ logo');
   assert.equal(lettersFound(spell, found), 11);
   found = matchWords(spell, 'cair vao', found);
   assert.equal(found.length, spellWordCount(spell));
-  assert.equal(maskWords(spell, found), spell);
+  assert.equal(shown(found), spell);
   assert.deepEqual(matchWords('Vita Tua Mea Vita', 'vita'), [0, 3]); // repeated words both found
+});
+
+test('fillWords puts a player\'s found words on top of the shared hangman letters', () => {
+  assert.equal(fillWords('I___s A______s D____a', { 2: 'Devora' }), 'I___s A______s Devora');
+  assert.equal(fillWords('_____ ___ ____ ____', { 0: 'abutres', 3: 'logo' }), 'abutres ___ ____ logo');
+  assert.equal(fillWords('I___s A______s'), 'I___s A______s');
 });

@@ -89,10 +89,12 @@ export function matchWords(latin: string, guess: string, found: number[] = []): 
   return [...next].sort((a, b) => a - b);
 }
 
-/** Memorize: the spell with found words shown and the others as underscores. */
-export function maskWords(latin: string, found: number[]): string {
-  const shown = new Set(found);
-  return latin.trim().split(/\s+/).map((w, i) => (shown.has(i) ? w : '_'.repeat(w.length))).join(' ');
+/**
+ * Fills a player's found words (index → word) into a masked spell. Used by Hangman (on top of the
+ * shared revealed letters) and Memorize (on top of all underscores).
+ */
+export function fillWords(masked: string, found: Record<number, string> = {}): string {
+  return masked.split(' ').map((w, i) => found[i] ?? w).join(' ');
 }
 
 /** Memorize: how many letters the found words add up to (the tie-breaker at the time limit). */

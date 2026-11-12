@@ -27,13 +27,38 @@ export function gameWinner(results: RoundResults): PlayerColor | null {
   return null;
 }
 
-/** Label for a round number (1-based), e.g. "Round 2" or "Round 4 · Extra round". */
-export function roundLabel(round: number): string {
+/** Training alone is always this many rounds. */
+export const TRAINING_ROUNDS = 5;
+
+/** A versus game is over once it has a winner; a training session after TRAINING_ROUNDS rounds. */
+export function isGameOver(results: RoundResults, training: boolean): boolean {
+  return training ? results.length >= TRAINING_ROUNDS : gameWinner(results) !== null;
+}
+
+/** Training summary: rounds played, solved, failed and the best (lowest) solved time. */
+export function trainingSummary(results: RoundResults, times: Array<number | null>) {
+  const solvedTimes = times.filter((t, i): t is number => results[i] !== null && t !== null);
+  const solved = results.filter((r) => r !== null).length;
+  return { played: results.length, solved, failed: results.length - solved, best: solvedTimes.length ? Math.min(...solvedTimes) : null };
+}
+
+/** Label for a round number (1-based), e.g. "Round 2", "Round 4 · Extra round" or "Training · Round 2 of 5". */
+export function roundLabel(round: number, training = false): string {
+  if (training) return `Training · Round ${round} of ${TRAINING_ROUNDS}`;
   return round > BASE_ROUNDS ? `Round ${round} · Extra round` : `Round ${round}`;
 }
 
+/** "1.84 s" */
+export const formatSeconds = (ms: number) => `${(ms / 1000).toFixed(2)} s`;
+
 /** Why a round ended without a winner, for the result screens. */
-export function drawReason(end: Pick<BattleEnd, 'allWrong' | 'mode' | 'results'>): string {
+export function drawReason(end: Pick<BattleEnd, 'allWrong' | 'mode' | 'results'> & { game?: { training: boolean } }): string {
+  if (end.game?.training) {
+    if (end.allWrong) return 'Wrong answer';
+    if (end.mode === 'puzzle') return 'Puzzle not finished in time';
+    if (end.mode === 'memorize' || end.mode === 'hangman') return 'Spell not completed in time';
+    return 'Time ran out';
+  }
   if (end.allWrong) return 'Both wizards chose wrong';
   if (end.mode === 'puzzle') return 'Nobody finished the puzzle in time';
   if (end.mode === 'memorize') {

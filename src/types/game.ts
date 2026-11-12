@@ -17,8 +17,14 @@ export interface GameInfo {
   round: number;
   results: RoundResults;
   score: GameScore;
-  /** Game winner once the game is over, otherwise null. */
+  /** Game winner once the game is over, otherwise null. Always null in training. */
   winner: PlayerColor | null;
+  /** The game (or training session) is finished: show the final screen. */
+  over: boolean;
+  /** Training alone ("Start alone"): 5 rounds, each solved or failed; the room is closed to new players. */
+  training: boolean;
+  /** Per finished round: the winner's time in ms, or null (draw / failed). */
+  times: Array<number | null>;
 }
 
 /** battle:end payload: one round's result plus the game state after it. */
@@ -87,10 +93,14 @@ export interface Room {
   mode: BattleMode | null;
   /** Translate/describe: players who picked a wrong option this round. */
   lockedOut: Set<string>;
-  /** Memorize: spell word indices each player has found this round (socketId → indices). */
-  memorizeFound: Map<string, number[]>;
+  /** Memorize/Hangman: spell word indices each player has typed correctly this round (socketId → indices). */
+  foundWords: Map<string, number[]>;
   /** Results of the current game's finished rounds. Cleared when a new game starts or is cancelled. */
   roundResults: RoundResults;
+  /** Winner's time per finished round (null for a draw/failed round); parallel to roundResults. */
+  roundTimes: Array<number | null>;
+  /** Training alone: one player, 5 rounds, nobody else may join. */
+  solo: boolean;
 }
 
 export interface SpellData {

@@ -8,35 +8,41 @@ import SpellInput from '@/components/SpellInput';
 import ChoiceInput from '@/components/ChoiceInput';
 import PhoneResult from '@/components/PhoneResult';
 import PuzzleInput from '@/components/PuzzleInput';
-import { MODE_LABELS } from '@/lib/modes';
+import { MODE_LABELS, fillWords } from '@/lib/modes';
 import { roundLabel } from '@/lib/game';
 import type { PlayerColor, GamePhase, BattleMode, SpellReveal, GameInfo, BattleEnd } from '@/types/game';
 
 /** Where to send visitors of a room that no longer exists. The start page shows a notice for it. */
 const ROOM_EXPIRED_URL = '/?expired=1';
 
-/** Memorize: this player's found words, from spell:progress. */
-interface MemorizeProgress { masked: string; found: number; total: number }
+/** Memorize/Hangman: this player's correctly typed words (index → word), from spell:progress. */
+interface WordProgress { words: Record<number, string>; found: number; total: number }
+
+/** Shared by Memorize and Hangman: the player's words filled into `masked`, plus the word count. */
+function wordDisplay(category: string, masked: string, english: string, progress: WordProgress | null, hint: string) {
+  const total = progress?.total ?? masked.split(' ').length;
+  return {
+    category,
+    text: fillWords(masked, progress?.words),
+    slots: true,
+    english,
+    description: `${progress?.found ?? 0} of ${total} words found. ${hint}`,
+    resetInputKey: progress?.found ?? 0,
+  };
+}
 
 /** What SpellInput shows for the typing modes; null for the choice modes. */
-function typingDisplay(reveal: SpellReveal, memorizeHidden: boolean, progress: MemorizeProgress | null) {
+function typingDisplay(reveal: SpellReveal, memorizeHidden: boolean, progress: WordProgress | null) {
   switch (reveal.mode) {
     case 'type':
       return { category: reveal.spell.category, text: reveal.spell.latin, english: reveal.spell.english, description: reveal.spell.description };
     case 'hangman':
-      return { category: reveal.category, text: reveal.masked, slots: true, english: reveal.english };
+      return wordDisplay(reveal.category, reveal.masked, reveal.english, progress, 'Type any words you can guess.');
     case 'memorize':
       if (!memorizeHidden) {
         return { category: reveal.category, text: reveal.latin, english: reveal.english, notice: 'Memorize it', inputVisible: false };
       }
-      return {
-        category: reveal.category,
-        text: progress?.masked ?? reveal.masked,
-        slots: true,
-        english: reveal.english,
-        description: `${progress?.found ?? 0} of ${progress?.total ?? reveal.latin.split(' ').length} words found. Type any words you remember.`,
-        resetInputKey: progress?.found ?? 0,
-      };
+      return wordDisplay(reveal.category, reveal.masked, reveal.english, progress, 'Type any words you remember.');
     default:
       return null;
   }
@@ -70,7 +76,7 @@ export default function PlayPage({ params }: { params: Promise<{ room: string }>
   /** Local timestamp when the round ends in a draw, when the server told us. */
   const [deadline, setDeadline] = useState<number | null>(null);
   const [memorizeHidden, setMemorizeHidden] = useState(false);
-  const [memorizeProgress, setMemorizeProgress] = useState<MemorizeProgress | null>(null);
+  const [wordProgress, setWordProgress] = useState<WordProgress | null>(null);
   const [submitted, setSubmitted] = useState<{ correct: boolean; durationMs: number } | null>(null);
   const [graceSeconds, setGraceSeconds] = useState<number | null>(null);
   const graceTimerRef = useRef<ReturnType<typeof setInterval>>();
@@ -103,7 +109,7 @@ export default function PlayPage({ params }: { params: Promise<{ room: string }>
         setReveal(null);
         setDeadline(null);
         setMemorizeHidden(false);
-        setMemorizeProgress(null);
+        setWordProgress(null);
         setGraceSeconds(null);
         setBattleEnd(null);
       }
@@ -133,7 +139,7 @@ export default function PlayPage({ params }: { params: Promise<{ room: string }>
       setCountdown(null);
       setReveal(data);
       setMemorizeHidden(false);
-      setMemorizeProgress(null);
+      setWordProgress(null);
       setDeadline('limitMs' in data ? Date.now() + data.limitMs : null);
       setPhase('spell');
     });
@@ -150,8 +156,8 @@ export default function PlayPage({ params }: { params: Promise<{ room: string }>
       setDeadline(Date.now() + data.limitMs);
     });
 
-    // Memorize: some typed words were right; only this player sees them.
-    socket.on('spell:progress', (data: MemorizeProgress) => setMemorizeProgress(data));
+    // Memorize/Hangman: some typed words were right; only this player sees them.
+    socket.on('spell:progress', (data: WordProgress) => setWordProgress(data));
 
     socket.on('spell:submitted', (data: { correct: boolean; durationMs: number; lockedOut?: boolean }) => {
       if (!data.correct) {
@@ -240,6 +246,21 @@ export default function PlayPage({ params }: { params: Promise<{ room: string }>
     });
   }, [roomId]);
 
+  // Training alone: start (only wizard alone in the room) and stop (room reopens for opponents).
+  const startAlone = useCallback(() => {
+    setError(null);
+    socketRef.current?.emit('player:solo', { roomId }, (res: { success: boolean; error?: string }) => {
+      if (!res.success) setError(res.error || 'Could not start training');
+    });
+  }, [roomId]);
+
+  const stopTraining = useCallback(() => {
+    setError(null);
+    socketRef.current?.emit('player:solo:stop', { roomId }, (res: { success: boolean; error?: string }) => {
+      if (!res.success) setError(res.error || 'Could not stop training');
+    });
+  }, [roomId]);
+
   const exitRoom = useCallback(() => {
     socketRef.current?.emit('player:exit', { roomId });
     window.location.href = '/';
@@ -251,7 +272,7 @@ export default function PlayPage({ params }: { params: Promise<{ room: string }>
   return (
     <main className="flex-1 flex flex-col items-center justify-center min-h-screen px-4 py-6">
       {countdown !== null && (
-        <Countdown seconds={countdown} label={game && mode ? `${roundLabel(game.round)} · ${MODE_LABELS[mode]}` : undefined} />
+        <Countdown seconds={countdown} label={game && mode ? `${roundLabel(game.round, game.training)} · ${MODE_LABELS[mode]}` : undefined} />
       )}
 
       {showFight && (
@@ -283,7 +304,7 @@ export default function PlayPage({ params }: { params: Promise<{ room: string }>
           )}
           {mode && game && (phase === 'countdown' || phase === 'spell') && (
             <div className="mt-2 text-amber-400 text-sm font-bold uppercase tracking-widest">
-              {roundLabel(game.round)} · {MODE_LABELS[mode]}
+              {roundLabel(game.round, game.training)} · {MODE_LABELS[mode]}
             </div>
           )}
         </div>
@@ -328,7 +349,9 @@ export default function PlayPage({ params }: { params: Promise<{ room: string }>
         {phase === 'waiting' && (
           <div className="text-center py-12">
             <div className="text-5xl mb-4 animate-bounce inline-block">🧙</div>
-            {bothReady ? (
+            {game?.training ? (
+              <p className="text-amber-300 text-lg font-bold">Training alone — starting…</p>
+            ) : bothReady ? (
               <p className="text-amber-300 text-lg font-bold">Both wizards ready — battle starting…</p>
             ) : fightReady ? (
               <p className="text-gray-300 text-lg font-medium">Ready! Waiting for your opponent to press Let&apos;s Fight…</p>
@@ -345,6 +368,19 @@ export default function PlayPage({ params }: { params: Promise<{ room: string }>
                 <p className="text-gray-500 text-sm mt-3">
                   {playerCount < 2 ? 'Waiting for an opponent to join…' : 'Press when you are ready to duel'}
                 </p>
+                {/* Only on pages opened from the main screen's wizard cards (?color=), while nobody else is here. */}
+                {preferredColor && playerCount === 1 && (
+                  <>
+                    <button
+                      onClick={startAlone}
+                      className="mt-6 w-full min-h-[44px] py-3 text-lg font-bold uppercase tracking-wider rounded-2xl border-2 border-amber-500/60
+                        text-amber-300 hover:bg-amber-500/10 transition-colors"
+                    >
+                      🧙 Start alone
+                    </button>
+                    <p className="text-gray-500 text-sm mt-2">Train 5 rounds by yourself. Nobody else can join until you stop.</p>
+                  </>
+                )}
               </div>
             )}
             {notice && <p role="status" className="text-amber-300 text-sm mt-4">{notice}. A new opponent can join with the QR code.</p>}
@@ -376,9 +412,9 @@ export default function PlayPage({ params }: { params: Promise<{ room: string }>
           />
         )}
 
-        {phase === 'spell' && reveal && typingDisplay(reveal, memorizeHidden, memorizeProgress) && (
+        {phase === 'spell' && reveal && typingDisplay(reveal, memorizeHidden, wordProgress) && (
           <SpellInput
-            {...typingDisplay(reveal, memorizeHidden, memorizeProgress)!}
+            {...typingDisplay(reveal, memorizeHidden, wordProgress)!}
             deadline={deadline}
             spellRevealedAt={reveal.revealedAt}
             onSubmit={submitSpell}
@@ -395,6 +431,7 @@ export default function PlayPage({ params }: { params: Promise<{ room: string }>
             opponentPresent={playerCount >= 2}
             onContinue={pressContinue}
             onExit={exitRoom}
+            onStopTraining={stopTraining}
             error={error}
           />
         )}

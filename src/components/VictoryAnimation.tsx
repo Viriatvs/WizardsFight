@@ -13,6 +13,8 @@ interface VictoryAnimationProps {
   durationMs: number | null;
   /** Shown instead of a winner when nobody won. */
   drawReason?: string;
+  /** Big word when nobody won: "DRAW", or "FAILED" in training. */
+  drawLabel?: string;
 }
 
 export const VICTORY_GIF: Record<PlayerColor, string> = {
@@ -21,13 +23,13 @@ export const VICTORY_GIF: Record<PlayerColor, string> = {
 };
 
 /** Full-screen result overlay for the host (main) screen. */
-export default function VictoryAnimation({ winnerColor, winnerName, title, subtitle, durationMs, drawReason }: VictoryAnimationProps) {
+export default function VictoryAnimation({ winnerColor, winnerName, title, subtitle, durationMs, drawReason, drawLabel = 'DRAW' }: VictoryAnimationProps) {
   if (!winnerColor) {
     return (
       <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-md animate-fade-in">
         <div className="text-center px-4">
           <div className="text-2xl md:text-3xl font-bold uppercase tracking-widest text-gray-300 mb-2">{title}</div>
-          <div className="text-6xl md:text-7xl font-black text-gray-400 mb-4">DRAW</div>
+          <div className="text-6xl md:text-7xl font-black text-gray-400 mb-4">{drawLabel}</div>
           <div className="text-gray-400 text-lg">{drawReason ?? 'No valid spell cast in time'}</div>
           {subtitle && <div className="text-gray-200 text-2xl font-bold mt-6">{subtitle}</div>}
         </div>

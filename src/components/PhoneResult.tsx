@@ -2,7 +2,8 @@
 
 import ScoreTable from '@/components/ScoreTable';
 import { VICTORY_GIF } from '@/components/VictoryAnimation';
-import { roundLabel, drawReason, winDetail } from '@/lib/game';
+import TrainingSummary from '@/components/TrainingSummary';
+import { roundLabel, drawReason, winDetail, formatSeconds } from '@/lib/game';
 import type { BattleEnd, PlayerColor } from '@/types/game';
 
 interface PhoneResultProps {
@@ -13,16 +14,62 @@ interface PhoneResultProps {
   opponentPresent: boolean;
   onContinue: () => void;
   onExit: () => void;
+  /** Training only: back to a normal waiting room that opponents can join. */
+  onStopTraining: () => void;
   error?: string | null;
 }
 
 const COLOR_TEXT: Record<PlayerColor, string> = { blue: 'text-blue-400', red: 'text-red-400' };
+const BUTTON = 'min-h-[44px] px-6 py-3 text-white font-bold rounded-xl transition-colors';
+
+/** Training alone: Solved/Failed for the round, or the summary after the last round. */
+function TrainingResult({ end, onContinue, onExit, onStopTraining, error }: Omit<PhoneResultProps, 'myColor' | 'waiting' | 'opponentPresent'>) {
+  const { over } = end.game;
+  return (
+    <div className="text-center py-4">
+      {over ? (
+        <h2 className="text-3xl font-black text-amber-400">Training complete</h2>
+      ) : (
+        <>
+          <div className="text-sm font-bold uppercase tracking-widest text-gray-400 mb-1">{roundLabel(end.game.round, true)}</div>
+          {end.winnerColor ? (
+            <>
+              <div className="text-4xl font-black text-emerald-400">✓ Solved</div>
+              {end.durationMs !== null && <div className="text-gray-300 font-mono mt-2">⚡ {formatSeconds(end.durationMs)}</div>}
+            </>
+          ) : (
+            <>
+              <div className="text-4xl font-black text-red-400">✗ Failed</div>
+              <p className="text-gray-400 mt-1">{drawReason(end)}</p>
+            </>
+          )}
+        </>
+      )}
+
+      <div className="mt-6">
+        <TrainingSummary results={end.game.results} times={end.game.times} />
+      </div>
+
+      <div className="mt-8 flex flex-wrap gap-3 justify-center">
+        <button onClick={onContinue} className={`${BUTTON} bg-amber-600 hover:bg-amber-500`}>
+          {over ? '🔁 Train again' : '⚔️ Next round'}
+        </button>
+        <button onClick={onStopTraining} className={`${BUTTON} bg-gray-700 hover:bg-gray-600`}>Stop training</button>
+        <button onClick={onExit} className={`${BUTTON} bg-gray-800 hover:bg-gray-700`}>Exit</button>
+      </div>
+      {error && <p role="alert" className="text-red-400 text-sm mt-4">{error}</p>}
+    </div>
+  );
+}
 
 /** Phone screen after a round (score + Next round) or after the game (animation + final table + Fight again). */
-export default function PhoneResult({ end, myColor, waiting, opponentPresent, onContinue, onExit, error }: PhoneResultProps) {
+export default function PhoneResult(props: PhoneResultProps) {
+  const { end, myColor, waiting, opponentPresent, onContinue, onExit, error } = props;
+  if (end.game.training) return <TrainingResult {...props} />;
+
   const names = Object.fromEntries(Object.values(end.results).map((r) => [r.color, r.name])) as Partial<Record<PlayerColor, string>>;
   const gameWinner = end.game.winner;
-  const gameOver = !!gameWinner;
+  const gameOver = end.game.over && !!gameWinner;
   const continueLabel = gameOver ? 'Fight again' : 'Next round';
 
   return (

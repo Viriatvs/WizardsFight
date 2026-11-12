@@ -13,6 +13,9 @@ A real-time spell-casting duel for two players. **Core idea: the game is opened 
 5. Both phones get the same Latin spell, presented according to the mode (see "Battle modes"). The fastest **correct** answer wins the round.
 6. The main screen shows the winner animation with the winner's name, then the score. The phones show the result and a **Next round** button.
 7. When the game is decided, the main screen shows the game winner, then returns to the waiting room. The phones show the animation, a side-by-side score table, and **Fight again** / **Exit**.
+8. A single wizard can also **train alone**: on a page opened from a wizard card on the main screen, **Start alone** runs 5 rounds by themselves while the room is closed to others (see "Training alone").
+
+The main screen also has a copy-link button after the room link under the QR code (`CopyLinkButton`), so a player can send the join link to an opponent.
 
 Credits (landing page footer): created by MOSORIO, based on an idea by HREYNOLDS.
 
@@ -68,7 +71,7 @@ src/
   lib/scoring.ts           normalizeSpell, validateSubmission, determineWinner
   lib/modes.ts             Battle modes: MODES, MODE_LABELS, randomMode, buildChoices, maskSpell, revealRandomLetter,
                            PUZZLE, scramblePuzzle, isSolved, hangmanStart, hangmanNextLetter,
-                           matchWords, maskWords, lettersFound, spellWordCount (pure, shared)
+                           matchWords, fillWords, lettersFound, spellWordCount (pure, shared)
   lib/modes.test.ts        Unit tests for modes.ts
   app/layout.tsx           Root layout (dark background)
   app/page.tsx             Landing page: "Start Fight" creates a room, then goes to /battle/:id
@@ -79,7 +82,8 @@ src/
                            VictoryAnimation (host overlay: player's name as headline over the GIF),
                            SpellInput (typing modes: full spell / letter slots / memorize phase), ChoiceInput (4 options),
                            ScoreTable (Blue vs Red: won/lost/draws + per-round chips),
-                           PhoneResult (phone screen after a round or game), PuzzleInput (puzzle board)
+                           PhoneResult (phone screen after a round or game; training variant), PuzzleInput (puzzle board),
+                           TrainingSummary (played/solved/failed/best + per-round chips), CopyLinkButton
 public/images/             Battlefield scenes (empty / blue ready / red ready / both) + victory GIFs per color
                            + puzzle-red-wizard.webp (600x800 crop of red-wizard_ready.png at x1190 y70 w420 h560,
                            nearest-neighbour scaled with sharp; regenerate the same way if the source image changes)
@@ -91,7 +95,8 @@ The server is authoritative. Pages are `'use client'`. Each page opens its own S
 
 - `state`: `'waiting' | 'countdown' | 'playing' | 'ended'`
 - `players`: `Map<socketId, Player>`. Max 2. A `Player` has `color`, `name`, `fightReady` (Let's Fight), and `rematchReady` (Next round / Fight again).
-- `roundResults`: the current game's finished rounds, as `(PlayerColor | null)[]` (null = draw). Payloads carry it as `game: GameInfo` = `{round, results, score, winner}`.
+- `roundResults`: the current game's finished rounds, as `(PlayerColor | null)[]` (null = draw / failed), and `roundTimes` (the winner's ms per round, or null). `newGame(room)` clears both. Payloads carry them as `game: GameInfo` = `{round, results, score, winner, over, training, times}`. **Use `game.over` to know a game/training session is finished**, not `winner` (training has no winner).
+- `solo`: training alone is active (one player, room closed to joins).
 - `submissions`: `Map<socketId, Submission>`. Holds **correct** casts only.
 - `spell`, `mode`. Both are kept across `resetRoom` so the next round can avoid repeating them.
 - `lockedOut`: `Set<socketId>` of players who picked a wrong option this round (Translate/Describe).
@@ -141,9 +146,9 @@ Time is always measured on the server: `durationMs = serverNow - spellRevealedAt
 | `type` | Speed Cast | `{spell, revealedAt}` | `SpellInput`: Latin, English, description | Type it; unlimited retries | Both correct → fastest wins. One correct → `grace {seconds:3}`, then they win (`graceTimeout`). Draw after 30 s (`timedOut`). |
 | `translate` | Translate | `{latin, category, options[4], revealedAt, limitMs}` | `ChoiceInput`: Latin + 4 English translations | **One pick.** A wrong pick puts you in `lockedOut` for the round. | First correct pick wins. All players wrong → draw (`allWrong`). Draw after 15 s (`timedOut`). |
 | `describe` | Describe | Same as translate | `ChoiceInput`: Latin + 4 descriptions | Same as translate | Same as translate |
-| `hangman` | Hangman | `{masked, english, category, revealedAt}`. `masked` starts with every word's first letter visible (`hangmanStart`). | `SpellInput` with letter slots + English hint | Type it; unlimited retries | Every 1 s the server sends `spell:hint {masked}` with one more letter (`hangmanNextLetter`): first each word's last letter, left to right, then random letters. With the last letter it adds `limitMs: 40000`. First correct wins. Draw 40 s after the last letter (`timedOut`, `HANGMAN_AFTER_FULL_MS`). |
+| `hangman` | Hangman | `{masked, english, category, revealedAt}`. `masked` starts with every word's first letter visible (`hangmanStart`). | `SpellInput` with letter slots + English hint + "N of M words found". The shared letters with the player's own found words filled in (`fillWords`). | Like Memorize: type any words, any number of times; each correct word fills in **for that player only** (`spell:progress`); a guess with no new word → `spell:submitted {correct:false}`. | Every 1 s the server sends `spell:hint {masked}` with one more letter (`hangmanNextLetter`): first each word's last letter, left to right, then random letters. Both players see the same letters. With the last letter it adds `limitMs: 40000`. First to find every word wins. Draw 40 s after the last letter (`timedOut`, `HANGMAN_AFTER_FULL_MS`). No letters tie-break. |
 | `puzzle` | Puzzle | `{image, cols:3, rows:4, order[12], revealedAt, limitMs}` (same scramble for both, never pre-solved) | `PuzzleInput`: 12 tile buttons, each showing its part of `/images/puzzle-red-wizard.webp` via CSS `background-position`. Tap two tiles to swap; no preview. | When the picture is complete the phone sends its order as `"0,1,…,11"`; the server checks `isSolved` (unsolved arrangements are ignored). | First solved wins. Draw after 60 s (`PUZZLE_LIMIT_MS`, `timedOut`). |
-| `memorize` | Memorize | `{latin, masked, english, category, revealedAt, memorizeMs}` | Latin + "MEMORIZE IT" for 5 s (no input), then `spell:hide {limitMs: 30000}` → dashes + English hint + "N of M words found" + input | Type any words, any number of times. Each correct word (`matchWords`: any position, case-insensitive, repeats all found) is stored in `room.memorizeFound` and revealed **for that player only** via `spell:progress {masked, found, total}`. A guess with no new word → `spell:submitted {correct:false}`. Submits during the 5 s phase are ignored. | First to find every word wins. At 30 s (`MEMORIZE_LIMIT_MS`): more correct letters (`lettersFound`) wins (`onLetters`, `results[].letters`); equal letters (incl. 0–0) is a draw (`timedOut`). |
+| `memorize` | Memorize | `{latin, masked, english, category, revealedAt, memorizeMs}` | Latin + "MEMORIZE IT" for 5 s (no input), then `spell:hide {limitMs: 30000}` → dashes + English hint + "N of M words found" + input | Type any words, any number of times. Each correct word (`matchWords`: any position, case-insensitive, repeats all found) is stored in `room.foundWords` and revealed **for that player only** via `spell:progress {words, found, total}`. A guess with no new word → `spell:submitted {correct:false}`. Submits during the 5 s phase are ignored. | First to find every word wins. At 30 s (`MEMORIZE_LIMIT_MS`): more correct letters (`lettersFound`) wins (`onLetters`, `results[].letters`); equal letters (incl. 0–0) is a draw (`timedOut`). |
 
 - Options in Translate/Describe: `buildChoices` takes the correct answer plus 3 different answers from other spells and shuffles them. The server checks the chosen text exactly against `spell.english` / `spell.description`.
 - Typed answers: `validateSubmission` lowercases, trims and collapses whitespace on both sides, then compares exactly.
@@ -167,6 +172,18 @@ Payload (`BattleEnd` type): `{winnerColor, winnerName, durationMs, results: {[so
   
   While the opponent hasn't pressed yet, the server emits `rematch:waiting {waitingFor}`.
 
+### 7b. Training alone (`room.solo`)
+- **Start alone** is shown on the phone's waiting screen only on pages opened from the main screen's wizard cards (`?color=` in the URL) and only while that wizard is alone. The server doesn't check how the page was opened. The button emits `player:solo`, which the server accepts only in `waiting` with exactly 1 player. It sets `room.solo`, starts a new game, and starts round 1 after 2 s (`startBattle` needs only 1 player when `solo`).
+- **Room closed:** `room:join` is refused with "This room is in training mode…". The main screen shows "Training — room closed to new players".
+- **5 rounds** (`TRAINING_ROUNDS`, `isGameOver(results, true)`). Modes and limits are as normal. A round is **solved** (the player is the round "winner", time in `game.times`) or **failed** (`null`). Rule tweaks:
+  - Speed Cast ends as soon as every player in the room answered;
+  - a wrong Translate/Describe pick fails the round;
+  - Memorize never wins on letters in training (`endMemorizeOnLetters`).
+- Labels use `roundLabel(round, true)` ("Training · Round 2 of 5"). Fail messages use `drawReason` (training wording). Summaries use `trainingSummary()` and `<TrainingSummary>`.
+- **Phone:** Solved/Failed plus the summary, with **Next round** / **Stop training** / **Exit**. After round 5 it shows "Training complete" with **Train again** (`player:reset`, a new session) / **Stop training** / **Exit**.
+- **Main screen:** the animation with the player's name for a solved round, or "FAILED", then a training scoreboard. After round 5 it goes back to the waiting view with a "Last training: Merlin solved 4/5, best 1.84 s" banner.
+- **Stop training** emits `player:solo:stop`, which is allowed between rounds or after the session. It clears `solo` and the score and returns to `waiting`, so an opponent can join. The training player leaving also clears `solo`.
+
 ### 8. Leaving
 - **Exit** (phone) emits `player:exit`, then the phone goes to `/`. A socket `disconnect` does the same. Both go through `removePlayer()`:
   - while `playing`: the other player wins the round by forfeit;
@@ -189,13 +206,15 @@ Payload (`BattleEnd` type): `{winnerColor, winnerName, durationMs, results: {[so
 | `spell:submit` | phone → server | `{roomId, text}` |
 | `player:reset` | phone → server | `{roomId}` (Next round / Fight again) |
 | `player:exit` | phone → server | `{roomId}` |
+| `player:solo` | phone → server | `{roomId}`, ack `{success, error?}` (Start alone) |
+| `player:solo:stop` | phone → server | `{roomId}`, ack `{success, error?}` (Stop training) |
 | `room:update` | server → room | `{id, state, mode, players[{color,name,socketId,rematchReady,fightReady}], playerCount, maxPlayers, spellRevealedAt, startedAt, game: GameInfo}`. `mode` is null while waiting. |
 | `countdown` | server → room | `{seconds}` |
 | `fight` | server → room | `{text:'FIGHT'}` |
 | `spell:reveal` | server → room | `SpellReveal` (per mode, see §5) |
 | `spell:hint` | server → room | `{masked, limitMs?}` (hangman) |
 | `spell:hide` | server → room | `{limitMs}` (memorize) |
-| `spell:progress` | server → one player | `{masked, found, total}` (memorize: that player's found words) |
+| `spell:progress` | server → one player | `{words: {[index]: word}, found, total}` (memorize & hangman: that player's correctly typed words; the phone fills them in with `fillWords`) |
 | `spell:submitted` | server → one player | `{correct, durationMs, lockedOut?}` |
 | `grace` | server → room | `{seconds: 3}` |
 | `battle:end` | server → room | see §6 |
