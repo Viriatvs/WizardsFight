@@ -70,7 +70,7 @@ src/
   lib/spells.ts            Server-only: parses /spells.md at startup + randomSpell(excludeLatin)
   lib/scoring.ts           normalizeSpell, validateSubmission, determineWinner
   lib/modes.ts             Battle modes: MODES, MODE_LABELS, randomMode, buildChoices, maskSpell, revealRandomLetter,
-                           PUZZLE, scramblePuzzle, isSolved, hangmanStart, hangmanNextLetter,
+                           PUZZLE, PUZZLE_IMAGES, randomPuzzleImage, scramblePuzzle, isSolved, hangmanStart, hangmanNextLetter,
                            matchWords, fillWords, lettersFound, spellWordCount (pure, shared)
   lib/modes.test.ts        Unit tests for modes.ts
   app/layout.tsx           Root layout (dark background)
@@ -85,8 +85,10 @@ src/
                            PhoneResult (phone screen after a round or game; training variant), PuzzleInput (puzzle board),
                            TrainingSummary (played/solved/failed/best + per-round chips), CopyLinkButton
 public/images/             Battlefield scenes (empty / blue ready / red ready / both) + victory GIFs per color
-                           + puzzle-red-wizard.webp (600x800 crop of red-wizard_ready.png at x1190 y70 w420 h560,
-                           nearest-neighbour scaled with sharp; regenerate the same way if the source image changes)
+                           + puzzle pictures (600x800, 3:4) listed in `PUZZLE_IMAGES` (modes.ts): puzzle-red-wizard.webp
+                           (crop of red-wizard_ready.png at x1190 y70 w420 h560), puzzle-blue-wizard.webp,
+                           puzzle-blue-wizard_burn.webp, puzzle-red-wizard_electro.webp. New ones: 600x800, add to the list.
+                           + bg-ruins.webp (dimmed, blurred background)
 ```
 
 The server is authoritative. Pages are `'use client'`. Each page opens its own Socket.IO connection in a `useEffect` and keeps UI state in `useState`. The server code imports from `src/lib` and `src/types`, so treat those modules as shared between server and client. Keep them free of browser and React code.
@@ -147,7 +149,7 @@ Time is always measured on the server: `durationMs = serverNow - spellRevealedAt
 | `translate` | Translate | `{latin, category, options[4], revealedAt, limitMs}` | `ChoiceInput`: Latin + 4 English translations | **One pick.** A wrong pick puts you in `lockedOut` for the round. | First correct pick wins. All players wrong → draw (`allWrong`). Draw after 15 s (`timedOut`). |
 | `describe` | Describe | Same as translate | `ChoiceInput`: Latin + 4 descriptions | Same as translate | Same as translate |
 | `hangman` | Hangman | `{masked, english, category, revealedAt}`. `masked` starts with every word's first letter visible (`hangmanStart`). | `SpellInput` with letter slots + English hint + "N of M words found". The shared letters with the player's own found words filled in (`fillWords`). | Like Memorize: type any words, any number of times; each correct word fills in **for that player only** (`spell:progress`); a guess with no new word → `spell:submitted {correct:false}`. | Every 1 s the server sends `spell:hint {masked}` with one more letter (`hangmanNextLetter`): first each word's last letter, left to right, then random letters. Both players see the same letters. With the last letter it adds `limitMs: 40000`. First to find every word wins. Draw 40 s after the last letter (`timedOut`, `HANGMAN_AFTER_FULL_MS`). No letters tie-break. |
-| `puzzle` | Puzzle | `{image, cols:3, rows:4, order[12], revealedAt, limitMs}` (same scramble for both, never pre-solved) | `PuzzleInput`: 12 tile buttons, each showing its part of `/images/puzzle-red-wizard.webp` via CSS `background-position`. Tap two tiles to swap; no preview. | When the picture is complete the phone sends its order as `"0,1,…,11"`; the server checks `isSolved` (unsolved arrangements are ignored). | First solved wins. Draw after 60 s (`PUZZLE_LIMIT_MS`, `timedOut`). |
+| `puzzle` | Puzzle | `{image, cols:3, rows:4, order[12], revealedAt, limitMs}` (same picture and scramble for both, never pre-solved; the picture is random from `PUZZLE_IMAGES`, never the room's previous one: `randomPuzzleImage`, `room.puzzleImage`) | `PuzzleInput`: 12 tile buttons, each showing its part of the picture via CSS `background-position`. Tap two tiles to swap; no preview. | When the picture is complete the phone sends its order as `"0,1,…,11"`; the server checks `isSolved` (unsolved arrangements are ignored). | First solved wins. Draw after 60 s (`PUZZLE_LIMIT_MS`, `timedOut`). |
 | `memorize` | Memorize | `{latin, masked, english, category, revealedAt, memorizeMs}` | Latin + "MEMORIZE IT" for 5 s (no input), then `spell:hide {limitMs: 30000}` → dashes + English hint + "N of M words found" + input | Type any words, any number of times. Each correct word (`matchWords`: any position, case-insensitive, repeats all found) is stored in `room.foundWords` and revealed **for that player only** via `spell:progress {words, found, total}`. A guess with no new word → `spell:submitted {correct:false}`. Submits during the 5 s phase are ignored. | First to find every word wins. At 30 s (`MEMORIZE_LIMIT_MS`): more correct letters (`lettersFound`) wins (`onLetters`, `results[].letters`); equal letters (incl. 0–0) is a draw (`timedOut`). |
 
 - Options in Translate/Describe: `buildChoices` takes the correct answer plus 3 different answers from other spells and shuffles them. The server checks the chosen text exactly against `spell.english` / `spell.description`.
@@ -190,7 +192,8 @@ Payload (`BattleEnd` type): `{winnerColor, winnerName, durationMs, results: {[so
   - **mid-game** (game not decided): the game is cancelled. `roundResults` is cleared and the room goes back to `waiting`, so the remaining phone shows "X left the room" and waits for a new opponent;
   - **after the game is over:** nothing is reset, so the other phone keeps its final table. Its Fight again then returns it to waiting for a new opponent. A new player joining an `ended` room starts a fresh game.
 - If a player leaves during the countdown, the countdown stops (the room is no longer in `countdown`).
-- **Abandoned rooms:** every minute the server runs `sweepAbandonedRooms` (rooms.ts). It deletes rooms that have had **no connected screen (host or phone) for 10 minutes** (`ROOM_ABANDONED_MS`). A room stays alive as long as its host screen is open, even with no players.
+- **Abandoned rooms:** every minute the server runs `sweepAbandonedRooms` (rooms.ts). It deletes rooms that have had **no connected screen (host or phone) for 5 minutes** (`ROOM_ABANDONED_MS`). A player alone on the waiting screen (nobody joined yet, or the opponent left) gets an **Exit room** button (`player:exit`), so they can leave and free the room. A room stays alive as long as its host screen is open, even with no players.
+- **Exit room (main screen):** a button under the room id emits `room:close`. Only a host socket of that room may do it. The server stops the round (bumps `round`, sets state `ended`), sends `room:closed` to every other socket in the room, removes them from it and deletes the room. Phones (and any other main screen) then redirect to `/?expired=1`, and the closing screen goes to `/`.
 - **Missing rooms redirect:** `/play/:room` emits `room:check` on every (re)connect, and `/battle/:room` gets `notFound` from `room:watch`. If the room no longer exists (abandoned, or wiped by a restart or deploy), the page redirects to `/?expired=1`. There the start page shows "That battle has ended or no longer exists".
 
 ### Socket events
@@ -199,6 +202,8 @@ Payload (`BattleEnd` type): `{winnerColor, winnerName, durationMs, results: {[so
 |---|---|---|
 | `room:create` | landing → server | ack `{roomId}` |
 | `room:check` | phone → server | `{roomId}`, ack `{exists}` |
+| `room:close` | host → server | `{roomId}`, ack `{success, error?}` (Exit room on the main screen) |
+| `room:closed` | server → room (except the closer) | none; phones and other main screens go to `/?expired=1` |
 | `room:watch` | host → server | `{roomId}`, ack `{success, data?, error?, notFound?}` |
 | `room:join` | phone → server | `{roomId, name?, color?}`, ack `{success, color?, error?, notFound?}` |
 | `player:name` | phone → server | `{roomId, name}` (rename; not currently used by the UI) |

@@ -123,12 +123,24 @@ export default function BattlePage({ params }: { params: Promise<{ room: string 
       setError(data.message);
       setTimeout(() => setError(null), 3000);
     });
+    // Another main screen watching this room closed it.
+    socket.on('room:closed', () => window.location.replace(ROOM_EXPIRED_URL));
 
     return () => {
       clearTimeout(animationTimer.current);
       socket.disconnect();
     };
   }, [roomId]);
+
+  // "Exit room": closes the room for everyone (phones go to the start page) and returns this screen to Start Fight.
+  const closeRoom = () => {
+    const socket = socketRef.current;
+    if (!socket?.connected) return window.location.assign('/');
+    socket.emit('room:close', { roomId }, (res: { success: boolean; error?: string }) => {
+      if (res.success) return window.location.assign('/');
+      setError(res.error || 'Could not close the room');
+    });
+  };
 
   const roomUrl = typeof window !== 'undefined'
     ? `${window.location.origin}/play/${roomId}`
@@ -231,6 +243,9 @@ export default function BattlePage({ params }: { params: Promise<{ room: string 
             <span className={`w-2 h-2 rounded-full ${connected ? 'bg-emerald-500' : 'bg-red-500'}`} />
             <span className="text-gray-600">{connected ? 'Live' : 'Disconnected'}</span>
           </div>
+          <button onClick={closeRoom} className="btn-pixel-secondary mt-6 text-sm">
+            🚪 Exit room
+          </button>
         </div>
 
         {lastGame && (

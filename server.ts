@@ -1,11 +1,11 @@
 import http from 'http';
 import next from 'next';
 import { Server, Socket } from 'socket.io';
-import { createRoom, getRoom, sweepAbandonedRooms } from './src/lib/rooms';
+import { createRoom, getRoom, deleteRoom, sweepAbandonedRooms } from './src/lib/rooms';
 import { randomSpell, SPELLS } from './src/lib/spells';
 import { validateSubmission, determineWinner } from './src/lib/scoring';
 import {
-  randomMode, buildChoices, maskSpell, scramblePuzzle, isSolved, PUZZLE,
+  randomMode, buildChoices, maskSpell, scramblePuzzle, isSolved, PUZZLE, randomPuzzleImage,
   hangmanStart, hangmanNextLetter, matchWords, lettersFound, spellWordCount,
 } from './src/lib/modes';
 import { gameScore, gameWinner, isGameOver } from './src/lib/game';
@@ -23,7 +23,7 @@ const HANGMAN_AFTER_FULL_MS = 40000;
 const MEMORIZE_SHOW_MS = 5000;
 const MEMORIZE_LIMIT_MS = 30000;
 const PUZZLE_LIMIT_MS = 60000;
-const ROOM_ABANDONED_MS = 10 * 60 * 1000;
+const ROOM_ABANDONED_MS = 5 * 60 * 1000;
 const ROOM_SWEEP_INTERVAL_MS = 60 * 1000;
 
 const app = next({ dev });
@@ -193,7 +193,8 @@ function revealSpell(io: Server, room: Room) {
       return;
     }
     case 'puzzle': {
-      emit({ mode: 'puzzle', ...PUZZLE, order: scramblePuzzle(), revealedAt, limitMs: PUZZLE_LIMIT_MS });
+      room.puzzleImage = randomPuzzleImage(room.puzzleImage);
+      emit({ mode: 'puzzle', image: room.puzzleImage, ...PUZZLE, order: scramblePuzzle(), revealedAt, limitMs: PUZZLE_LIMIT_MS });
       drawAfter(io, room, PUZZLE_LIMIT_MS);
       return;
     }
@@ -270,6 +271,25 @@ app.prepare().then(() => {
       socket.data.role = 'host';
       socket.join(room.id);
       if (cb) cb({ success: true, data: roomToPayload(room) });
+    });
+
+    // Main screen "Exit room": closes the room for everyone. Phones get room:closed and go to the start page.
+    socket.on('room:close', (payload: { roomId: string }, cb?: (result: { success: boolean; error?: string }) => void) => {
+      const room = getRoom(payload?.roomId);
+      if (!room || socket.data.role !== 'host' || socket.data.roomId !== room.id) {
+        if (cb) cb({ success: false, error: 'Only the main screen of this room can close it' });
+        return;
+      }
+      // Stop anything still scheduled for this room: every timer checks the round/state before acting.
+      room.round++;
+      room.state = 'ended';
+      socket.to(room.id).emit('room:closed');
+      io.in(room.id).socketsLeave(room.id);
+      deleteRoom(room.id);
+      socket.data.roomId = undefined;
+      socket.data.role = undefined;
+      console.log(`[room ${room.id}] closed by the main screen`);
+      if (cb) cb({ success: true });
     });
 
     socket.on('room:join', (payload: { roomId: string; name?: string; color?: PlayerColor }, cb?: (result: { success: boolean; color?: PlayerColor; error?: string; notFound?: boolean }) => void) => {

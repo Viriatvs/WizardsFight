@@ -23,6 +23,7 @@ export function createRoom(hostSocketId: string): Room {
     roundResults: [],
     roundTimes: [],
     solo: false,
+    puzzleImage: null,
     foundWords: new Map(),
   };
   rooms.set(id, room);

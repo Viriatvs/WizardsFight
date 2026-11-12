@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   MODES, randomMode, buildChoices, maskSpell, revealRandomLetter, CHOICE_COUNT, scramblePuzzle, isSolved,
+  PUZZLE_IMAGES, randomPuzzleImage,
   hangmanStart, hangmanNextLetter, matchWords, lettersFound, spellWordCount, fillWords,
 } from './modes';
 import type { SpellData } from '@/types/game';
@@ -104,4 +105,18 @@ test('fillWords puts a player\'s found words on top of the shared hangman letter
   assert.equal(fillWords('I___s A______s D____a', { 2: 'Devora' }), 'I___s A______s Devora');
   assert.equal(fillWords('_____ ___ ____ ____', { 0: 'abutres', 3: 'logo' }), 'abutres ___ ____ logo');
   assert.equal(fillWords('I___s A______s'), 'I___s A______s');
+});
+
+test('randomPuzzleImage never repeats the previous picture and can reach every other one', () => {
+  for (const prev of PUZZLE_IMAGES) {
+    const seen = new Set<string>();
+    const others = PUZZLE_IMAGES.length - 1;
+    for (let i = 0; i < others; i++) {
+      const img = randomPuzzleImage(prev, () => i / others);
+      assert.notEqual(img, prev);
+      seen.add(img);
+    }
+    assert.equal(seen.size, others);
+  }
+  assert.ok(PUZZLE_IMAGES.includes(randomPuzzleImage(null) as (typeof PUZZLE_IMAGES)[number]));
 });

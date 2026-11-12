@@ -101,6 +101,8 @@ export interface Room {
   roundTimes: Array<number | null>;
   /** Training alone: one player, 5 rounds, nobody else may join. */
   solo: boolean;
+  /** Last puzzle picture used in this room, so the next Puzzle round shows a different one. */
+  puzzleImage: string | null;
 }
 
 export interface SpellData {

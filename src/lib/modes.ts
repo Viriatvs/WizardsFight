@@ -12,9 +12,23 @@ export const MODE_LABELS: Record<BattleMode, string> = {
   puzzle: 'Puzzle',
 };
 
-/** Puzzle mode: 600x800 crop of red-wizard_ready.png, cut into 3 x 4 = 12 tiles. */
-export const PUZZLE = { image: '/images/puzzle-red-wizard.webp', cols: 3, rows: 4 } as const;
+/** Puzzle mode: a 3 x 4 = 12-tile grid. */
+export const PUZZLE = { cols: 3, rows: 4 } as const;
 const PUZZLE_TILES = PUZZLE.cols * PUZZLE.rows;
+
+/** Puzzle pictures: all 600x800 (3:4) pixel art in public/images. To add one, drop it there and list it here. */
+export const PUZZLE_IMAGES = [
+  '/images/puzzle-red-wizard.webp',
+  '/images/puzzle-blue-wizard.webp',
+  '/images/puzzle-blue-wizard_burn.webp',
+  '/images/puzzle-red-wizard_electro.webp',
+] as const;
+
+/** Random puzzle picture, never the same as the previous one when there is a choice. */
+export function randomPuzzleImage(previous: string | null, rand: Rand = Math.random): string {
+  const available = PUZZLE_IMAGES.filter((img) => img !== previous);
+  return available[Math.floor(rand() * available.length)];
+}
 
 export const CHOICE_COUNT = 4;
 

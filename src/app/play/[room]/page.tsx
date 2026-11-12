@@ -196,6 +196,9 @@ export default function PlayPage({ params }: { params: Promise<{ room: string }>
       setNotice(`${data.name} left the room`);
     });
 
+    // The main screen closed the room ("Exit room").
+    socket.on('room:closed', () => window.location.replace(ROOM_EXPIRED_URL));
+
     socket.on('error', (data: { message: string }) => {
       setError(data.message);
     });
@@ -364,6 +367,12 @@ export default function PlayPage({ params }: { params: Promise<{ room: string }>
                     </button>
                     <p className="text-gray-400 text-sm mt-4">Train 5 rounds by yourself. Nobody else can join until you stop.</p>
                   </>
+                )}
+                {/* Alone in the room (nobody joined yet, or the opponent left): leave and free the slot. */}
+                {playerCount === 1 && (
+                  <button onClick={exitRoom} className="btn-pixel-secondary mt-8 w-full">
+                    Exit room
+                  </button>
                 )}
               </div>
             )}
