@@ -20,7 +20,7 @@ export default function BattleImage({ blueJoined, redJoined, countdown, battleSt
   const imageSrc = getSceneImage(blueJoined, redJoined);
 
   return (
-    <div className="relative w-full max-w-[1200px] mx-auto rounded-2xl overflow-hidden border-2 border-gray-700 shadow-2xl shadow-black/40">
+    <div className="relative w-full max-w-[1200px] mx-auto overflow-hidden border-4 border-gray-950 shadow-[8px_8px_0_0_rgba(0,0,0,0.65)]">
       <img
         src={imageSrc}
         alt="Battlefield scene"

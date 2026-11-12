@@ -22,11 +22,11 @@ export default function TrainingSummary({ results, times, large }: TrainingSumma
 
   return (
     <div className="w-full">
-      <dl className="grid grid-cols-2 gap-3">
+      <dl className="grid grid-cols-2 gap-5">
         {stats.map(([label, value, color]) => (
-          <div key={label} className="rounded-xl border border-gray-700 bg-gray-900/60 px-3 py-2">
+          <div key={label} className="panel-stone px-3 py-2">
             <dt className={`text-gray-400 ${large ? 'text-base' : 'text-xs'} uppercase tracking-wider`}>{label}</dt>
-            <dd className={`font-mono font-bold ${color} ${large ? 'text-4xl' : 'text-2xl'}`}>{value}</dd>
+            <dd className={`font-pixel font-bold ${color} ${large ? 'text-4xl' : 'text-2xl'}`}>{value}</dd>
           </div>
         ))}
       </dl>
@@ -36,7 +36,7 @@ export default function TrainingSummary({ results, times, large }: TrainingSumma
           {results.map((r, i) => (
             <li
               key={i}
-              className={`px-3 py-1 rounded-full border text-sm font-bold ${r ? 'border-emerald-500 text-emerald-300' : 'border-red-500/70 text-red-300'}`}
+              className={`px-3 py-1 border-2 text-sm font-bold ${r ? 'border-emerald-500 text-emerald-300' : 'border-red-500/70 text-red-300'}`}
             >
               R{i + 1}: {r && times[i] !== null ? formatSeconds(times[i]!) : 'Failed'}
             </li>

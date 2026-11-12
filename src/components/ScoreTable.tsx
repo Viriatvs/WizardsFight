@@ -29,7 +29,7 @@ export default function ScoreTable({ names, score, results, winner, large }: Sco
   const cell = large ? 'px-6 py-3 text-2xl' : 'px-3 py-2 text-lg';
 
   return (
-    <div className="w-full">
+    <div className="panel-stone w-full p-3">
       <table className="w-full border-collapse text-center">
         <caption className="sr-only">Game score</caption>
         <thead>
@@ -66,7 +66,7 @@ export default function ScoreTable({ names, score, results, winner, large }: Sco
           {results.map((r, i) => (
             <li
               key={i}
-              className={`px-3 py-1 rounded-full border text-sm font-bold ${r ? `${STYLE[r].border} ${STYLE[r].text}` : 'border-gray-600 text-gray-400'}`}
+              className={`px-3 py-1 border-2 text-sm font-bold ${r ? `${STYLE[r].border} ${STYLE[r].text}` : 'border-gray-600 text-gray-400'}`}
             >
               R{i + 1}: {r ? names[r] || STYLE[r].label : 'Draw'}
             </li>

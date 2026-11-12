@@ -15,13 +15,13 @@ export default function QRPanel({ roomUrl }: { roomUrl: string }) {
   }, [roomUrl]);
 
   if (!qrDataUrl) {
-    return <div className="w-64 h-64 bg-gray-800 rounded-xl animate-pulse" />;
+    return <div className="w-64 h-64 bg-gray-800 animate-pulse" />;
   }
 
   return (
     <div className="flex flex-col items-center gap-3">
       <div
-        className="w-64 h-64 rounded-xl border-2 border-amber-500/30 shadow-[0_0_20px_rgba(245,158,11,0.15)] bg-white p-2"
+        className="w-64 h-64 border-4 border-amber-600 shadow-[6px_6px_0_0_rgba(0,0,0,0.7)] bg-white p-2"
         style={{ backgroundImage: `url(${qrDataUrl})`, backgroundSize: 'contain', backgroundRepeat: 'no-repeat', backgroundPosition: 'center' }}
       />
       <p className="text-sm text-gray-400 font-mono">

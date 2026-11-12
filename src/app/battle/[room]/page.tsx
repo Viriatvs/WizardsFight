@@ -184,7 +184,7 @@ export default function BattlePage({ params }: { params: Promise<{ room: string 
 
       {/* Training between rounds: the training summary until the wizard presses Next round. */}
       {battleEnd && !animating && !battleEnd.game.over && battleEnd.game.training && (
-        <div className="fixed inset-0 z-40 flex items-center justify-center bg-[#0a0a1a]/95 px-4 animate-fade-in">
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-gray-950/95 px-4 animate-fade-in">
           <div className="w-full max-w-3xl text-center">
             <h2 className="text-3xl md:text-5xl font-black uppercase tracking-tight text-amber-400 mb-2">
               {roundLabel(battleEnd.game.round, true)}
@@ -203,7 +203,7 @@ export default function BattlePage({ params }: { params: Promise<{ room: string 
 
       {/* Between rounds: the score until both wizards press Next round. */}
       {battleEnd && !animating && !battleEnd.game.over && !battleEnd.game.training && (
-        <div className="fixed inset-0 z-40 flex items-center justify-center bg-[#0a0a1a]/95 px-4 animate-fade-in">
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-gray-950/95 px-4 animate-fade-in">
           <div className="w-full max-w-3xl text-center">
             <h2 className="text-3xl md:text-5xl font-black uppercase tracking-tight text-amber-400 mb-2">
               After {roundLabel(battleEnd.game.round).replace(' · Extra round', '')}
@@ -219,7 +219,7 @@ export default function BattlePage({ params }: { params: Promise<{ room: string 
 
       <div className="w-full max-w-4xl">
         <div className="text-center mb-8">
-          <h1 className="text-3xl md:text-4xl font-black uppercase tracking-tight">
+          <h1 className="flex flex-wrap justify-center items-center gap-x-3 text-3xl md:text-5xl font-black uppercase" style={{ textShadow: "4px 4px 0 #000" }}>
             <span className="text-blue-400">Wizards</span>
             <span className="text-gray-600 mx-1">vs</span>
             <span className="text-red-400">Wizards</span>
@@ -234,7 +234,7 @@ export default function BattlePage({ params }: { params: Promise<{ room: string 
         </div>
 
         {lastGame && (
-          <div role="status" className={`mb-6 mx-auto max-w-xl text-center px-4 py-3 rounded-xl border bg-amber-500/10 border-amber-500/40`}>
+          <div role="status" className="panel-stone mb-8 mx-auto max-w-xl text-center px-4 py-3">
             <span className="text-gray-300">{lastGame.label}: </span>
             <span className={`font-black ${lastGame.color === 'blue' ? 'text-blue-400' : 'text-red-400'}`}>{lastGame.name}</span>
             <span className="text-gray-300"> {lastGame.text}</span>
@@ -242,7 +242,7 @@ export default function BattlePage({ params }: { params: Promise<{ room: string 
         )}
 
         {training && (
-          <div role="status" className="mb-6 mx-auto max-w-xl text-center px-4 py-3 rounded-xl border border-amber-500/60 bg-amber-500/10 text-amber-200 font-bold">
+          <div role="status" className="panel-stone mb-8 mx-auto max-w-xl text-center px-4 py-3 text-amber-200 font-pixel">
             🧙 Training — room closed to new players
           </div>
         )}

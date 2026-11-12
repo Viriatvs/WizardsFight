@@ -2,15 +2,12 @@ import Link from 'next/link';
 
 export default function NotFound() {
   return (
-    <main className="flex-1 flex flex-col items-center justify-center min-h-screen bg-[#0a0a1a] text-gray-200 px-4">
-      <div className="text-center">
+    <main className="flex-1 flex flex-col items-center justify-center min-h-screen px-4">
+      <div className="panel-stone text-center px-8 py-10 max-w-md">
         <div className="text-6xl mb-4">🧙</div>
-        <h1 className="text-3xl font-black text-amber-400 mb-2">404 — Page Not Found</h1>
-        <p className="text-gray-400 mb-6">This spell does not exist in our spellbook.</p>
-        <Link
-          href="/"
-          className="inline-block px-8 py-3 bg-amber-600 hover:bg-amber-500 text-white font-bold rounded-xl transition-colors"
-        >
+        <h1 className="text-3xl text-amber-400 mb-2">404 — Page not found</h1>
+        <p className="text-gray-300 mb-8">This spell does not exist in our spellbook.</p>
+        <Link href="/" className="btn-pixel">
           Back to Start Fight
         </Link>
       </div>

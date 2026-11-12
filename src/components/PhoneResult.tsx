@@ -20,7 +20,6 @@ interface PhoneResultProps {
 }
 
 const COLOR_TEXT: Record<PlayerColor, string> = { blue: 'text-blue-400', red: 'text-red-400' };
-const BUTTON = 'min-h-[44px] px-6 py-3 text-white font-bold rounded-xl transition-colors';
 
 /** Training alone: Solved/Failed for the round, or the summary after the last round. */
 function TrainingResult({ end, onContinue, onExit, onStopTraining, error }: Omit<PhoneResultProps, 'myColor' | 'waiting' | 'opponentPresent'>) {
@@ -50,12 +49,12 @@ function TrainingResult({ end, onContinue, onExit, onStopTraining, error }: Omit
         <TrainingSummary results={end.game.results} times={end.game.times} />
       </div>
 
-      <div className="mt-8 flex flex-wrap gap-3 justify-center">
-        <button onClick={onContinue} className={`${BUTTON} bg-amber-600 hover:bg-amber-500`}>
+      <div className="mt-8 flex flex-wrap gap-5 justify-center">
+        <button onClick={onContinue} className="btn-pixel">
           {over ? '🔁 Train again' : '⚔️ Next round'}
         </button>
-        <button onClick={onStopTraining} className={`${BUTTON} bg-gray-700 hover:bg-gray-600`}>Stop training</button>
-        <button onClick={onExit} className={`${BUTTON} bg-gray-800 hover:bg-gray-700`}>Exit</button>
+        <button onClick={onStopTraining} className="btn-pixel-secondary">Stop training</button>
+        <button onClick={onExit} className="btn-pixel-secondary">Exit</button>
       </div>
       {error && <p role="alert" className="text-red-400 text-sm mt-4">{error}</p>}
     </div>
@@ -127,17 +126,11 @@ export default function PhoneResult(props: PhoneResultProps) {
       {waiting ? (
         <p className="text-amber-300 font-bold mt-8 animate-pulse">Waiting for your opponent to press {continueLabel}…</p>
       ) : (
-        <div className="mt-8 flex gap-4 justify-center">
-          <button
-            onClick={onContinue}
-            className="min-h-[44px] px-8 py-3 bg-amber-600 hover:bg-amber-500 text-white font-bold rounded-xl transition-colors"
-          >
+        <div className="mt-8 flex flex-wrap gap-5 justify-center">
+          <button onClick={onContinue} className="btn-pixel">
             ⚔️ {continueLabel}
           </button>
-          <button
-            onClick={onExit}
-            className="min-h-[44px] px-8 py-3 bg-gray-700 hover:bg-gray-600 text-white font-bold rounded-xl transition-colors"
-          >
+          <button onClick={onExit} className="btn-pixel-secondary">
             Exit
           </button>
         </div>

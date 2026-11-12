@@ -38,30 +38,34 @@ export default function LandingPage() {
             <span className="text-4xl sm:text-5xl">🧙‍♀️</span>
           </div>
 
-          <h1 className="text-3xl sm:text-5xl md:text-7xl font-black uppercase tracking-tight text-center leading-tight">
+          <h1
+            className="flex flex-wrap justify-center gap-x-3 text-4xl sm:text-6xl md:text-7xl font-black uppercase text-center leading-tight"
+            style={{ textShadow: '4px 4px 0 #000' }}
+          >
             <span className="text-blue-400">Wizards</span>
             <span className="text-gray-500 mx-1 sm:mx-2">vs</span>
             <span className="text-red-400">Wizards</span>
           </h1>
 
-          <h2 className="text-xl sm:text-3xl md:text-4xl font-bold mt-1 text-amber-400 text-center">
+          <h2 className="text-2xl sm:text-4xl md:text-5xl mt-1 text-amber-400 text-center" style={{ textShadow: '3px 3px 0 #000' }}>
             FIGHT
           </h2>
         </div>
 
-        <p className="text-gray-400 text-sm sm:text-lg mb-2 max-w-md mx-auto leading-relaxed px-2">
-          Challenge an opponent to a <strong className="text-gray-200">real-time spell-casting duel</strong>.
-          One spell. Two wizards. Fastest correct incantation wins.
-        </p>
-
-        <div className="text-gray-500 text-xs sm:text-sm mb-8 space-y-1">
-          <p>📱 Both players use their phones to cast</p>
-          <p>🖥️ One screen hosts the battle</p>
-          <p>🌍 Spells in <em className="text-amber-300">Latin</em></p>
+        <div className="panel-stone px-5 py-5 mb-10 mx-auto max-w-md">
+          <p className="text-gray-200 text-base sm:text-lg leading-relaxed">
+            Challenge an opponent to a <strong className="text-amber-300">real-time spell-casting duel</strong>.
+            One spell. Two wizards. Fastest correct incantation wins.
+          </p>
+          <div className="text-gray-400 text-sm mt-3 space-y-1">
+            <p>📱 Both players use their phones to cast</p>
+            <p>🖥️ One screen hosts the battle</p>
+            <p>🌍 Spells in <em className="text-amber-300">Latin</em></p>
+          </div>
         </div>
 
         {expired && (
-          <p role="status" className="mb-6 mx-auto max-w-sm px-4 py-3 rounded-xl border border-amber-500/40 bg-amber-500/10 text-amber-200 text-sm">
+          <p role="status" className="panel-stone mb-8 mx-auto max-w-sm px-4 py-3 text-amber-200 text-sm">
             That battle has ended or no longer exists. Start a new fight below.
           </p>
         )}
@@ -69,12 +73,12 @@ export default function LandingPage() {
         <button
           onClick={startFight}
           disabled={loading}
-          className="btn-fight w-full max-w-xs sm:px-12 py-4 text-xl sm:text-2xl font-black uppercase tracking-wider text-white rounded-2xl shadow-2xl shadow-red-900/30 disabled:opacity-50 disabled:cursor-wait"
+          className="btn-pixel w-full max-w-xs py-4 text-xl sm:text-2xl disabled:cursor-wait"
         >
-          {loading ? 'Creating Battle…' : '⚔️ Start Fight'}
+          {loading ? 'Creating battle…' : '⚔️ Start Fight'}
         </button>
 
-        <div className="mt-8 flex flex-wrap items-center justify-center gap-x-4 gap-y-2 sm:gap-8 text-gray-600 text-xs sm:text-sm px-4">
+        <div className="mt-10 flex flex-wrap items-center justify-center gap-x-4 gap-y-2 sm:gap-8 text-gray-500 text-xs sm:text-sm px-4 font-pixel uppercase tracking-wider">
           <span>2 Players Max</span>
           <span className="hidden sm:inline">•</span>
           <span>Real-time WebSocket</span>

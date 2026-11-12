@@ -290,7 +290,7 @@ export default function PlayPage({ params }: { params: Promise<{ room: string }>
 
       <div className="w-full max-w-md mx-auto">
         <div className="text-center mb-6">
-          <h1 className="text-2xl font-black uppercase tracking-tight">
+          <h1 className="flex flex-wrap justify-center gap-x-2 text-2xl font-black uppercase" style={{ textShadow: "3px 3px 0 #000" }}>
             <span className="text-blue-400">Wizards</span>
             <span className="text-gray-500 mx-1">vs</span>
             <span className="text-red-400">Wizards</span>
@@ -317,29 +317,22 @@ export default function PlayPage({ params }: { params: Promise<{ room: string }>
         )}
 
         {phase === 'name' && (
-          <div className="text-center py-12">
+          <div className="panel-stone text-center px-6 py-10 mt-4">
             <div className="text-5xl mb-4">🧙</div>
-            <p className="text-gray-300 text-lg font-medium mb-2">What is your wizard name?</p>
+            <label htmlFor="wizard-name" className="block font-pixel text-amber-300 text-xl mb-4">What is your wizard name?</label>
             <div className="max-w-xs mx-auto">
               <input
+                id="wizard-name"
                 type="text"
                 value={name}
                 onChange={(e) => setNameInput(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') submitName(); }}
                 placeholder="Your name…"
                 maxLength={24}
                 autoFocus
-                className="w-full px-4 py-3 text-base font-mono text-center bg-gray-900/80 border-2 border-gray-600 rounded-xl
-                  focus:border-amber-500 focus:outline-none focus:shadow-[0_0_15px_rgba(245,158,11,0.3)]
-                  placeholder:text-gray-500"
+                className="input-pixel"
               />
-              <button
-                onClick={submitName}
-                disabled={!name.trim()}
-                className="mt-4 w-full py-3 text-lg font-bold uppercase tracking-wider rounded-xl
-                  bg-amber-600 hover:bg-amber-500 text-white
-                  disabled:bg-gray-700 disabled:text-gray-400 disabled:cursor-not-allowed
-                  transition-colors shadow-lg"
-              >
+              <button onClick={submitName} disabled={!name.trim()} className="btn-pixel mt-8 w-full text-lg">
                 Enter Battle
               </button>
             </div>
@@ -347,7 +340,7 @@ export default function PlayPage({ params }: { params: Promise<{ room: string }>
         )}
 
         {phase === 'waiting' && (
-          <div className="text-center py-12">
+          <div className="panel-stone text-center px-6 py-10 mt-4">
             <div className="text-5xl mb-4 animate-bounce inline-block">🧙</div>
             {game?.training ? (
               <p className="text-amber-300 text-lg font-bold">Training alone — starting…</p>
@@ -357,28 +350,19 @@ export default function PlayPage({ params }: { params: Promise<{ room: string }>
               <p className="text-gray-300 text-lg font-medium">Ready! Waiting for your opponent to press Let&apos;s Fight…</p>
             ) : (
               <div className="max-w-xs mx-auto">
-                <button
-                  onClick={pressFight}
-                  disabled={playerCount < 2}
-                  className="btn-fight w-full py-4 text-xl font-black uppercase tracking-wider text-white rounded-2xl
-                    disabled:opacity-50 disabled:cursor-not-allowed"
-                >
+                <button onClick={pressFight} disabled={playerCount < 2} className="btn-pixel w-full py-4 text-xl">
                   ⚔️ Let&apos;s Fight
                 </button>
-                <p className="text-gray-500 text-sm mt-3">
+                <p className="text-gray-400 text-sm mt-5">
                   {playerCount < 2 ? 'Waiting for an opponent to join…' : 'Press when you are ready to duel'}
                 </p>
                 {/* Only on pages opened from the main screen's wizard cards (?color=), while nobody else is here. */}
                 {preferredColor && playerCount === 1 && (
                   <>
-                    <button
-                      onClick={startAlone}
-                      className="mt-6 w-full min-h-[44px] py-3 text-lg font-bold uppercase tracking-wider rounded-2xl border-2 border-amber-500/60
-                        text-amber-300 hover:bg-amber-500/10 transition-colors"
-                    >
+                    <button onClick={startAlone} className="btn-pixel-secondary mt-8 w-full text-lg">
                       🧙 Start alone
                     </button>
-                    <p className="text-gray-500 text-sm mt-2">Train 5 rounds by yourself. Nobody else can join until you stop.</p>
+                    <p className="text-gray-400 text-sm mt-4">Train 5 rounds by yourself. Nobody else can join until you stop.</p>
                   </>
                 )}
               </div>

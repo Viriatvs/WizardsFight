@@ -123,8 +123,8 @@ export default function SpellInput({
         )}
       </div>
 
-      <div className="text-center">
-        <div className="text-xs text-gray-500 uppercase tracking-widest mb-1">{category}</div>
+      <div className="panel-stone text-center w-full px-4 py-5">
+        <div className="font-pixel text-xs text-gray-400 uppercase tracking-widest mb-2">{category}</div>
         <p
           className={`text-2xl md:text-3xl text-amber-300 spell-glow leading-relaxed ${slots ? 'font-mono whitespace-pre-wrap break-words' : 'font-serif italic'}`}
           style={slots ? undefined : { fontFamily: '"Georgia", "Times New Roman", serif' }}
@@ -135,8 +135,8 @@ export default function SpellInput({
         {notice && (
           <p className="text-3xl font-black text-red-400 uppercase tracking-widest mt-4 animate-pulse">{notice}</p>
         )}
-        {english && <p className="text-gray-400 text-sm mt-2 italic">&ldquo;{english}&rdquo;</p>}
-        {description && <p className="text-gray-500 text-xs mt-1 leading-relaxed max-w-sm mx-auto">{description}</p>}
+        {english && <p className="text-gray-300 text-sm mt-2 italic">&ldquo;{english}&rdquo;</p>}
+        {description && <p className="text-gray-400 text-sm mt-1 leading-relaxed max-w-sm mx-auto">{description}</p>}
       </div>
 
       {showWrong && (
@@ -161,23 +161,14 @@ export default function SpellInput({
               spellCheck={false}
               disabled={disabled}
               autoFocus
-              className="w-full px-4 py-3 text-base font-mono text-center bg-gray-900/80 border-2 border-gray-600 rounded-xl
-                focus:border-amber-500 focus:outline-none focus:shadow-[0_0_15px_rgba(245,158,11,0.3)]
-                placeholder:text-gray-500 disabled:opacity-50 transition-all"
+              className="input-pixel font-mono"
             />
-            <button
-              type="submit"
-              disabled={disabled || !text.trim()}
-              className="mt-4 w-full py-3 text-lg font-bold uppercase tracking-wider rounded-xl
-                bg-amber-600 hover:bg-amber-500 text-white
-                disabled:bg-gray-700 disabled:text-gray-400 disabled:cursor-not-allowed
-                transition-colors shadow-lg shadow-amber-900/30"
-            >
+            <button type="submit" disabled={disabled || !text.trim()} className="btn-pixel mt-8 w-full text-lg">
               Cast Spell
             </button>
           </form>
 
-          <p className="text-gray-500 text-xs text-center">
+          <p className="text-gray-400 text-xs text-center">
             Type the Latin incantation exactly and press Enter or tap the button
           </p>
         </>

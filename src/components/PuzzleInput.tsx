@@ -73,7 +73,7 @@ export default function PuzzleInput({ image, cols, rows, initialOrder, onSolved,
       <div
         role="group"
         aria-label="Puzzle board"
-        className={`grid gap-0.5 w-full max-w-[360px] aspect-[3/4] rounded-xl overflow-hidden border-2 ${solved ? 'border-emerald-500' : 'border-gray-700'}`}
+        className={`grid gap-0.5 w-full max-w-[360px] aspect-[3/4] overflow-hidden border-4 shadow-[6px_6px_0_0_rgba(0,0,0,0.65)] ${solved ? 'border-emerald-500' : 'border-gray-700'}`}
         style={{ gridTemplateColumns: `repeat(${cols}, 1fr)` }}
       >
         {order.map((tile, slot) => (

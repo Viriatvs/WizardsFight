@@ -228,7 +228,11 @@ If you add or change an event, update both the server handler in `server.ts` and
 - **Spells** live in `/spells.md`, not in code. `src/lib/spells.ts` reads that file once when the server starts, so changes need a restart or deploy. The Latin may contain only letters and spaces, because players type it exactly. If a row is invalid, the server refuses to start and names the line. `spells.ts` uses `fs`, so never import it from client components.
 - **Timing constants:** the mode timings are named constants at the top of `server.ts` (`TYPE_LIMIT_MS`, `GRACE_MS`, `CHOICE_LIMIT_MS`, `HANGMAN_*`, `MEMORIZE_*`, `PUZZLE_LIMIT_MS`, `ROOM_ABANDONED_MS`, `ROOM_SWEEP_INTERVAL_MS`). The 2 s pre-battle delay is still written inline.
 - **Adding a mode:** add it to `BattleMode` and `SpellReveal` (types), `MODES`/`MODE_LABELS` (modes.ts), a `case` in `revealSpell()` and the answer rules in the `spell:submit` handler (server.ts), and the phone UI in `play/[room]/page.tsx`. If its draw needs its own wording, add it to `drawReason()` (game.ts). Then document it in §5.
-- **Colors:** blue = Tailwind `blue-400/500`, red = `red-400/500`, accent = `amber-*`, background `#0a0a1a`. Animations use the classes in `globals.css` (`animate-countdown`, `battle-text`, `spell-glow`, `animate-shake`, `confetti-piece`, `btn-fight`, …).
+- **Visual design:** pixel-art dark medieval. **Read `docs/design.md` before any UI work.**
+  - Use `btn-pixel` / `btn-pixel-secondary` for buttons, `panel-stone` for cards and panels, and `input-pixel` for inputs. Don't style new buttons with ad-hoc colors.
+  - `gray-*` is remapped to warm stone and corners are square (except `rounded-full`).
+  - The blue wizard uses `blue-*`, the red wizard `red-*`, and highlights use torch `amber-*`.
+  - Animations use the classes in `globals.css` (`animate-countdown`, `battle-text`, `spell-glow`, `animate-shake`, `confetti-piece`, …), and reduced motion is respected there.
 - **Path alias:** `@/*` → `src/*`. `tsx` resolves it for `server.ts` too.
 - **Mobile first** for `/play`, because phones are the controllers. `/battle` targets a large screen.
 - **Pushing:** don't push unless asked, because pushing to GitHub triggers a production deploy on Render.

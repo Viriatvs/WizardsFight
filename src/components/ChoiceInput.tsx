@@ -34,7 +34,7 @@ export default function ChoiceInput({ latin, category, question, options, onPick
   const secondsLeft = deadline ? Math.max(0, Math.ceil((deadline - now) / 1000)) : null;
 
   const optionClass = (option: string) => {
-    if (option !== picked) return picked ? 'border-gray-700 text-gray-500 opacity-50' : 'border-gray-600 text-gray-200 hover:border-amber-500 hover:bg-amber-500/10';
+    if (option !== picked) return picked ? 'border-gray-700 text-gray-500 opacity-50' : 'border-gray-600 bg-stone-dark/80 text-gray-100 hover:border-amber-500 hover:bg-amber-500/10';
     if (!result) return 'border-amber-500 bg-amber-500/10 text-amber-200';
     return result.correct ? 'border-emerald-500 bg-emerald-500/15 text-emerald-200' : 'border-red-500 bg-red-500/15 text-red-200';
   };
@@ -45,8 +45,8 @@ export default function ChoiceInput({ latin, category, question, options, onPick
         <div className={`font-mono text-lg ${secondsLeft <= 3 ? 'text-red-400 font-bold' : 'text-gray-400'}`}>⏳ {secondsLeft}s left</div>
       )}
 
-      <div className="text-center">
-        <div className="text-xs text-gray-500 uppercase tracking-widest mb-1">{category}</div>
+      <div className="panel-stone text-center w-full px-4 py-5">
+        <div className="font-pixel text-xs text-gray-400 uppercase tracking-widest mb-2">{category}</div>
         <p className="text-2xl md:text-3xl font-serif italic text-amber-300 spell-glow leading-relaxed" style={{ fontFamily: '"Georgia", "Times New Roman", serif' }}>
           {latin}
         </p>
@@ -59,7 +59,8 @@ export default function ChoiceInput({ latin, category, question, options, onPick
             key={option}
             onClick={() => pick(option)}
             disabled={!!picked}
-            className={`w-full min-h-[44px] px-4 py-3 text-left text-base rounded-xl border-2 transition-colors disabled:cursor-not-allowed ${optionClass(option)}`}
+            className={`w-full min-h-[44px] px-4 py-3 text-left text-base font-sans border-4 transition-colors disabled:cursor-not-allowed
+              focus:outline-none focus-visible:ring-4 focus-visible:ring-amber-400 ${optionClass(option)}`}
           >
             {option}
           </button>

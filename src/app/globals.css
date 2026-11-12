@@ -2,15 +2,128 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Pixel-art dark medieval theme: tokens here + tailwind.config.js. See docs/design.md. */
 :root {
-  --background: #0a0a1a;
-  --foreground: #e8e8e8;
+  --bg: #0d0a08;
+  --text: #f4efe6;
+  --torch: #e8891c;
+  --torch-light: #f5a940;
+  --torch-dark: #9a4f0c;
+  --stone: #2c2721;
+  --stone-dark: #16120e;
+  --stone-light: #4a4238;
+  --ink: #0a0705;
+  --pixel: 4px; /* one "pixel" of the stepped borders */
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background-color: var(--bg);
+  color: var(--text);
+  font-family: var(--font-body), system-ui, sans-serif;
+  font-size: 1.0625rem;
+}
+
+/* Dimmed ruins art + torch glow + vignette, fixed behind every page. */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(ellipse at 50% 18%, rgba(232, 137, 28, 0.16), transparent 55%),
+    radial-gradient(ellipse at center, transparent 35%, rgba(0, 0, 0, 0.85) 100%),
+    linear-gradient(rgba(13, 10, 8, 0.55), rgba(13, 10, 8, 0.8)),
+    url('/images/bg-ruins.webp') center / cover no-repeat;
+}
+
+/* Pixel font for titles, buttons and big numbers (font-black is used for those throughout). */
+h1, h2, h3, button, .font-black, .font-pixel {
+  font-family: var(--font-pixel), monospace;
+}
+.font-black {
+  font-weight: 700;
+}
+
+@layer components {
+  /* Chunky 8-bit button: square, stepped border, hard drop shadow; pushes down when pressed. */
+  .btn-pixel {
+    @apply inline-flex items-center justify-center gap-2 min-h-[44px] px-6 py-3 font-pixel font-bold uppercase tracking-wider;
+    position: relative;
+    color: var(--ink);
+    background: var(--torch);
+    box-shadow:
+      inset calc(var(--pixel) * -1) calc(var(--pixel) * -1) 0 0 var(--torch-dark),
+      inset var(--pixel) var(--pixel) 0 0 var(--torch-light),
+      0 calc(var(--pixel) * -1) 0 0 var(--ink),
+      0 var(--pixel) 0 0 var(--ink),
+      calc(var(--pixel) * -1) 0 0 0 var(--ink),
+      var(--pixel) 0 0 0 var(--ink),
+      0 calc(var(--pixel) * 2) 0 0 rgba(0, 0, 0, 0.7);
+    transition: transform 60ms steps(1), filter 120ms;
+  }
+  .btn-pixel:hover:not(:disabled) {
+    filter: brightness(1.1);
+  }
+  .btn-pixel:active:not(:disabled) {
+    transform: translateY(var(--pixel));
+    box-shadow:
+      inset calc(var(--pixel) * -1) calc(var(--pixel) * -1) 0 0 var(--torch-dark),
+      inset var(--pixel) var(--pixel) 0 0 var(--torch-light),
+      0 calc(var(--pixel) * -1) 0 0 var(--ink),
+      0 var(--pixel) 0 0 var(--ink),
+      calc(var(--pixel) * -1) 0 0 0 var(--ink),
+      var(--pixel) 0 0 0 var(--ink);
+  }
+  .btn-pixel:focus-visible {
+    outline: 3px solid var(--torch-light);
+    outline-offset: 8px;
+  }
+  .btn-pixel:disabled {
+    cursor: not-allowed;
+    filter: grayscale(0.85) brightness(0.6);
+  }
+
+  /* Stone variant for secondary actions (Exit, Stop training…). */
+  .btn-pixel-secondary {
+    @apply btn-pixel;
+    color: var(--text);
+    background: var(--stone-light);
+    --torch-dark: #2a241e;
+    --torch-light: #6b6052;
+  }
+
+  /* Carved stone tablet for cards, tables and result panels. */
+  .panel-stone {
+    background: rgba(28, 24, 20, 0.92);
+    box-shadow:
+      inset calc(var(--pixel) * -1) calc(var(--pixel) * -1) 0 0 rgba(0, 0, 0, 0.45),
+      inset var(--pixel) var(--pixel) 0 0 rgba(255, 240, 210, 0.07),
+      0 calc(var(--pixel) * -1) 0 0 var(--ink),
+      0 var(--pixel) 0 0 var(--ink),
+      calc(var(--pixel) * -1) 0 0 0 var(--ink),
+      var(--pixel) 0 0 0 var(--ink),
+      0 calc(var(--pixel) * 2) 0 0 rgba(0, 0, 0, 0.55);
+  }
+
+  /* Text inputs: sunken stone well. */
+  .input-pixel {
+    @apply w-full px-4 py-3 text-base text-center text-gray-50 placeholder:text-gray-500;
+    background: var(--stone-dark);
+    border: 0;
+    box-shadow:
+      inset var(--pixel) var(--pixel) 0 0 rgba(0, 0, 0, 0.6),
+      0 0 0 var(--pixel) var(--stone-light);
+  }
+  .input-pixel:focus {
+    outline: none;
+    box-shadow:
+      inset var(--pixel) var(--pixel) 0 0 rgba(0, 0, 0, 0.6),
+      0 0 0 var(--pixel) var(--torch);
+  }
+  .input-pixel:disabled {
+    opacity: 0.5;
+  }
 }
 
 @keyframes countdown-in {
@@ -111,17 +224,23 @@ body {
   content: '';
   position: absolute;
   inset: 0;
-  background: radial-gradient(ellipse at 50% 30%, rgba(120, 80, 255, 0.15), transparent 70%);
+  background: radial-gradient(ellipse at 50% 30%, rgba(232, 137, 28, 0.12), transparent 70%);
   pointer-events: none;
 }
 
-.btn-fight {
-  background: linear-gradient(135deg, #d97706, #dc2626);
-  transition: all 0.3s ease;
-}
-
-.btn-fight:hover {
-  background: linear-gradient(135deg, #f59e0b, #ef4444);
-  transform: translateY(-2px);
-  box-shadow: 0 10px 40px rgba(220, 38, 38, 0.3);
+/* Respect "reduce motion": stop decorative loops; the countdown number shows without its zoom. */
+@media (prefers-reduced-motion: reduce) {
+  .animate-bounce, .animate-pulse, .animate-spin, .animate-shake,
+  .spell-glow, .victory-text, .animate-victory-pulse, .battle-text, .animate-fade-in {
+    animation: none !important;
+  }
+  .animate-countdown {
+    animation: none !important;
+  }
+  .confetti-piece {
+    display: none;
+  }
+  .btn-pixel, .btn-pixel-secondary {
+    transition: none;
+  }
 }

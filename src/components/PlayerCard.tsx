@@ -18,7 +18,7 @@ const colorConfig = {
   blue: {
     label: 'BLUE WIZARD',
     border: 'border-blue-500',
-    glow: 'shadow-[0_0_20px_rgba(59,130,246,0.3)]',
+    glow: 'shadow-[6px_6px_0_0_rgba(0,0,0,0.65)]',
     text: 'text-blue-400',
     bg: 'bg-blue-500/10',
     dot: 'bg-blue-500',
@@ -27,7 +27,7 @@ const colorConfig = {
   red: {
     label: 'RED WIZARD',
     border: 'border-red-500',
-    glow: 'shadow-[0_0_20px_rgba(239,68,68,0.3)]',
+    glow: 'shadow-[6px_6px_0_0_rgba(0,0,0,0.65)]',
     text: 'text-red-400',
     bg: 'bg-red-500/10',
     dot: 'bg-red-500',
@@ -40,7 +40,7 @@ export default function PlayerCard({ color, name, joined, connected, result, isW
 
   if (!joined) {
     return (
-      <div className="flex flex-col items-center justify-center gap-2 p-6 rounded-2xl border-2 border-dashed border-gray-600 opacity-60 hover:opacity-100 transition-opacity">
+      <div className="flex flex-col items-center justify-center gap-2 p-6 border-4 border-dashed border-gray-600 bg-gray-950/60 opacity-60 hover:opacity-100 transition-opacity">
         {joinUrl ? (
           <a href={joinUrl} target="_blank" rel="noopener noreferrer" className="flex flex-col items-center gap-3 cursor-pointer">
             <span className={`text-5xl ${c.text}`}>{c.emoji}</span>
@@ -59,7 +59,7 @@ export default function PlayerCard({ color, name, joined, connected, result, isW
   }
 
   return (
-    <div className={`flex flex-col items-center gap-2 p-6 rounded-2xl border-2 ${c.border} ${c.bg} ${c.glow} ${isWinner ? 'scale-105' : ''} transition-all`}>
+    <div className={`flex flex-col items-center gap-2 p-6 border-4 ${c.border} ${c.bg} ${c.glow} ${isWinner ? 'scale-105' : ''} transition-all`}>
       {wins !== undefined && wins > 0 && (
         <div className={`text-3xl font-black ${c.text}`}>🏆 {wins}</div>
       )}
