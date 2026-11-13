@@ -116,6 +116,15 @@ export const isRpsHand = (text: unknown): text is RpsHand => RPS_HANDS.includes(
 
 export const randomRpsHand = (rand: Rand = Math.random): RpsHand => RPS_HANDS[Math.floor(rand() * RPS_HANDS.length)];
 
+/** A team's hand for a throw: its most-picked hand, a random one of the most-picked on a tie; null if nobody picked. */
+export function majorityHand(picks: RpsHand[], rand: Rand = Math.random): RpsHand | null {
+  const counts = RPS_HANDS.map((h) => picks.filter((p) => p === h).length);
+  const top = Math.max(...counts);
+  if (top === 0) return null;
+  const tied = RPS_HANDS.filter((_, i) => counts[i] === top);
+  return tied[Math.floor(rand() * tied.length)];
+}
+
 /** One throw: 'a' or 'b' wins, or null for a tie. No pick (null) loses to any pick; two missing picks tie. */
 export function rpsThrowWinner(a: RpsHand | null, b: RpsHand | null): 'a' | 'b' | null {
   if (a === b) return null;

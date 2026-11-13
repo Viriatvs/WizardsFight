@@ -46,6 +46,8 @@ export interface BattleEnd {
   graceTimeout?: boolean;
   allWrong?: boolean;
   forfeit?: boolean;
+  /** Won by the whole team (team average or team throws); winnerName is then the team's names. */
+  teamWin?: boolean;
 }
 
 /**

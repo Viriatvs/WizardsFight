@@ -71,7 +71,7 @@ export default function ChoiceInput({ latin, category, question, options, onPick
       {result && !result.correct && (
         <div className="text-center">
           <div className="text-2xl font-black text-red-400 animate-shake uppercase">Wrong!</div>
-          <p className="text-gray-400 text-sm mt-1">You&apos;re out this round. Waiting for your opponent…</p>
+          <p className="text-gray-400 text-sm mt-1">You&apos;re out this round. Waiting for the others…</p>
         </div>
       )}
     </div>

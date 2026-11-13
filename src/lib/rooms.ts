@@ -1,5 +1,6 @@
 import { nanoid } from 'nanoid';
 import type { Room, RoomState } from '@/types/game';
+import { MAX_PLAYERS } from './teams';
 
 const rooms = new Map<string, Room>();
 
@@ -14,7 +15,7 @@ export function createRoom(hostSocketId: string): Room {
     startedAt: null,
     spellRevealedAt: null,
     submissions: new Map(),
-    maxPlayers: 2,
+    maxPlayers: MAX_PLAYERS,
     graceTimerStarted: false,
     firstCorrectAt: null,
     round: 0,

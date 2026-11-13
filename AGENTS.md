@@ -4,7 +4,7 @@ Read this file before working on the project. It describes the code as it is now
 
 ## Idea
 
-A real-time spell-casting duel for two players. **Core idea: the game is opened in a browser on a main screen (laptop/TV), players join by scanning its QR code and play on their phones, and the main screen shows the result of every round and of the game.**
+A real-time spell-casting duel between two teams, Blue and Red (1 to 4 wizards each, up to 8 per room; `src/lib/teams.ts`). **Core idea: the game is opened in a browser on a main screen (laptop/TV), players join by scanning its QR code and play on their phones, and the main screen shows the result of every round and of the game.**
 
 1. The **host (main) screen** creates a battle room and shows a QR code.
 2. Two players scan the QR with their **phones**. Each enters a wizard name and gets a color, **blue** or **red**.
@@ -66,6 +66,7 @@ src/
   types/game.ts            Room, Player, Submission, SpellData, RoomState, PlayerColor, GamePhase, SpellReveal,
                            RoundResults, GameScore, GameInfo, BattleEnd (shared payload types)
   lib/game.ts              Game rules: gameScore, gameWinner (best of 3 + extra rounds), roundLabel (+ game.test.ts)
+  lib/teams.ts             Teams: MAX_PLAYERS, MAX_TEAM_SIZE, pickTeam, bothTeamsPresent, teamNames, teamAverages, higherTeam (+ teams.test.ts)
   lib/rooms.ts             In-memory room store: createRoom / getRoom / deleteRoom / sweepAbandonedRooms (+ rooms.test.ts)
   lib/spells.ts            Server-only: parses /spells.md at startup + randomSpell(excludeLatin)
   lib/scoring.ts           normalizeSpell, validateSubmission, determineWinner
@@ -97,7 +98,7 @@ The server is authoritative. Pages are `'use client'`. Each page opens its own S
 ### Room model (`src/types/game.ts`)
 
 - `state`: `'waiting' | 'countdown' | 'playing' | 'ended'`
-- `players`: `Map<socketId, Player>`. Max 2. A `Player` has `color`, `name`, `fightReady` (Let's Fight), and `rematchReady` (Next round / Fight again).
+- `players`: `Map<socketId, Player>`. Max 8 (`MAX_PLAYERS`), at most 4 per team (`MAX_TEAM_SIZE`). A `Player` has `color` (its team; can change in the waiting room), `name`, `fightReady` (Let's Fight), and `rematchReady` (Next round / Fight again).
 - `roundResults`: the current game's finished rounds, as `(PlayerColor | null)[]` (null = draw / failed), and `roundTimes` (the winner's ms per round, or null). `newGame(room)` clears both. Payloads carry them as `game: GameInfo` = `{round, results, score, winner, over, training, times}`. **Use `game.over` to know a game/training session is finished**, not `winner` (training has no winner).
 - `solo`: training alone is active (one player, room closed to joins).
 - `submissions`: `Map<socketId, Submission>`. Holds **correct** casts only.
@@ -114,27 +115,28 @@ The server is authoritative. Pages are `'use client'`. Each page opens its own S
 - Emits `room:watch {roomId}`. The server sets `hostSocketId`, joins the socket to the Socket.IO room, and returns the room payload.
 - Shows `BattleImage`. The scene image changes as players join.
 - Shows a QR code for `<origin>/play/:room`.
-- Shows two `PlayerCard`s. While a slot is empty, its card links to `/play/:room?color=blue|red` in a new tab. This is handy for testing both players on one machine.
+- Shows two team cards (`PlayerCard`): each lists its wizards (✓ = pressed Let's Fight) and, while waiting and the team has room, links to `/play/:room?color=blue|red` in a new tab ("+ Add a wizard to this team"). This is handy for testing several players on one machine.
 - Listens for `room:update`, `countdown`, `fight`, `spell:reveal`, `battle:end`, and `player:disconnected`.
 - Shows the countdown overlay with "Round N · Mode", then FIGHT!, then "Battle in progress — Round N · Mode".
-- On `battle:end`, plays `VictoryAnimation` for `ANIMATION_MS` (5 s). The headline is the player's typed name; draws show DRAW. Then:
+- On `battle:end`, plays `VictoryAnimation` for `ANIMATION_MS` (5 s). The headline is the round winner's name (the team's names, "Merlin & Ana", when the whole team won it: `teamWin`) or the game-winning team's names; draws show DRAW. Then:
   - **game goes on:** a full-screen scoreboard (`ScoreTable`, large) stays until the next round's countdown;
   - **game over:** back to the normal waiting room, with a "Last game: X won 2 – 1" banner.
-- PlayerCards show each player's round wins in the current game.
+- Team cards show each team's round wins in the current game.
 
 ### 3. Player joins (`/play/:room`)
 Phone phases (`GamePhase`): `connecting → name → waiting → countdown → spell → ended`.
 - After connecting, the phone shows the name form. The name is required and limited to 24 characters.
 - **Enter Battle** emits `room:join {roomId, name, color?}`. `color` comes from the `?color=` query param.
 - Server rules:
-  - Reject the join if the room doesn't exist, the state is `countdown` or `playing`, or the room already has 2 players.
-  - Color: the preferred color if it's free, otherwise the first free color (blue, then red).
-  - If the room was `ended` and a slot opened up, the join resets the room to `waiting`.
+  - Reject the join if the room doesn't exist, is in training, the state is `countdown` or `playing`, it's between rounds of an unfinished game, or it already has 8 wizards.
+  - Team (`pickTeam`): the preferred color if that team has room, otherwise the smaller team (blue on a tie).
+  - If the room was `ended` (game over), the join starts a fresh game and resets the room to `waiting`.
+- **Switching team:** in the waiting room, a phone that hasn't pressed Let's Fight shows "Switch to Red/Blue team" (`player:team {roomId, color}`), refused once ready or when that team is full. Both phones list the teams.
 - The server broadcasts `room:update` to the whole room.
 
 ### 4. Start battle
-- Each phone presses **Let's Fight**, which emits `player:ready`. The button is disabled until both players have joined. The server sets `fightReady`.
-- When 2 players are present and both are ready, the server waits **2 s** and calls `startBattle()`.
+- Each phone presses **Let's Fight**, which emits `player:ready`. The button is disabled until each team has at least one wizard. The server sets `fightReady`, which also locks the wizard's team.
+- When every wizard is ready and both teams have someone (`bothTeamsPresent`; uneven teams are fine), the server waits **2 s** (`PRE_BATTLE_DELAY_MS`) and calls `startBattle()` (`startWhenAllReady`).
 - `startBattle`:
   - Sets `round++` and state `countdown`.
   - Picks a random **mode** (`randomMode`: a mode not yet played in this battle, tracked in `room.modesUsed` and cleared by `newGame`; once all were played a new cycle starts; never the same as the previous round) and a random spell (never the same as the previous one), then emits `room:update`, which now includes `mode`. Both screens show the mode name on the countdown.
@@ -154,6 +156,7 @@ Time is always measured on the server: `durationMs = serverNow - spellRevealedAt
 | `rps` | Rock Paper Scissors | `{winsNeeded: 2, revealedAt}`, then per throw `rps:throw {throw, limitMs: 3000}` and `rps:result` | `RpsInput`: score, a 3 s timer and three pixel-art buttons (`RpsIcon`, no text; `aria-label`s name them). After a throw both hands + who won it, for 2 s (`RPS_SHOW_MS`). | Phone sends `rock`/`paper`/`scissors` as `spell:submit` text; one pick per throw (`room.rps`); the throw resolves when every player picked or after 3 s (`RPS_PICK_MS`). No pick loses to any pick (`rpsThrowWinner`); same hands or both missing → tie, throw again. Training: a random computer hand (`'cpu'`). | First to win 2 throws (`RPS_WINS_NEEDED`) wins; time = until that throw's result ended. Computer wins in training → failed round. 3 throws in a row with no picks at all → draw (`timedOut`, `RPS_MAX_IDLE_THROWS`). |
 | `math` | Math Is Magic | `{question: {a, b, options[4]}, revealedAt, limitMs: 10000}` (never the product itself) | `MathInput`: "a × b", 4 number buttons, right-answer count, timer, Right!/Wrong after each pick | Phone sends `"<question index>:<number>"`. Every pick (right or wrong) moves that player on: `math:next {question, right, lastCorrect}` to that player only. Both players get the same questions in the same order (`room.math.questions`, grown with `mathQuestion` as needed); a stale index (double tap) is ignored. Factors come from `MATH_FACTOR` (2–9); wrong options are near misses (a neighbouring times-table result, or the product ±1/±10). | At 10 s (`MATH_LIMIT_MS`): more right answers wins (`results[].rightAnswers`, `winDetail`); equal is a draw (`timedOut`). Training: passed with `MATH_TRAINING_TARGET` (5) right. Winner's time is recorded as 10 s. |
 
+- **Teams in each mode:** race modes (Speed Cast, Translate, Describe, Puzzle, a completed Memorize) are won by the first/fastest correct wizard for their team; Speed Cast and the all-wrong draw wait for every wizard still in the room. Count modes at the time limit (Memorize letters, Math Is Magic right answers) compare **team averages** (`teamAverages`, `higherTeam`), so uneven teams stay fair; equal averages are a draw. Rock Paper Scissors: every wizard picks and each team throws its **most-picked hand** (`majorityHand`, ties random); a team where nobody picked loses the throw. Team wins set `teamWin`, and the result screens and fight history name a team by its members (`teamNames`: "Merlin, Ana & Zed").
 - Options in Translate/Describe: `buildChoices` takes the correct answer plus 3 different answers from other spells and shuffles them. The server checks the chosen text exactly against `spell.english` / `spell.description`.
 - Typed answers: `validateSubmission` lowercases, trims and collapses whitespace on both sides, then compares exactly.
 - `spell:submitted {correct, durationMs, lockedOut?}` goes only to the player who answered. Typing modes clear a wrong result after 2 s so the player can retry. A locked-out player keeps the wrong state.
@@ -190,8 +193,9 @@ Payload (`BattleEnd` type): `{winnerColor, winnerName, durationMs, results: {[so
 
 ### 8. Leaving
 - **Exit** (phone) emits `player:exit`, then the phone goes to `/`. A socket `disconnect` does the same. Both go through `removePlayer()`:
-  - while `playing`: the other player wins the round by forfeit;
-  - **mid-game** (game not decided): the game is cancelled. `roundResults` is cleared and the room goes back to `waiting`, so the remaining phone shows "X left the room" and waits for a new opponent;
+  - **their team still has someone:** the battle goes on. If the round or throw was only waiting for them (all others submitted / locked out / picked), it ends now (`checkRoundComplete`); between rounds the next round starts once everyone left has pressed Next round.
+  - **their team is now empty**, while `playing`: the other team wins the round by forfeit;
+  - **team empty, mid-game** (game not decided): the game is cancelled. `roundResults` is cleared and the room goes back to `waiting`, so the remaining phone shows "X left the room" and waits for a new opponent;
   - **after the game is over:** nothing is reset, so the other phone keeps its final table. Its Fight again then returns it to waiting for a new opponent. A new player joining an `ended` room starts a fresh game.
 - If a player leaves during the countdown, the countdown stops (the room is no longer in `countdown`).
 - **Abandoned rooms:** every minute the server runs `sweepAbandonedRooms` (rooms.ts). It deletes rooms that have had **no connected screen (host or phone) for 5 minutes** (`ROOM_ABANDONED_MS`). A player alone on the waiting screen (nobody joined yet, or the opponent left) gets an **Exit room** button (`player:exit`), so they can leave and free the room. A room stays alive as long as its host screen is open, even with no players.
@@ -210,6 +214,7 @@ Payload (`BattleEnd` type): `{winnerColor, winnerName, durationMs, results: {[so
 | `room:join` | phone → server | `{roomId, name?, color?}`, ack `{success, color?, error?, notFound?}` |
 | `player:name` | phone → server | `{roomId, name}` (rename; not currently used by the UI) |
 | `player:ready` | phone → server | `{roomId}` (Let's Fight) |
+| `player:team` | phone → server | `{roomId, color}`, ack `{success, error?}` (switch team before Let's Fight) |
 | `spell:submit` | phone → server | `{roomId, text}` |
 | `player:reset` | phone → server | `{roomId}` (Next round / Fight again) |
 | `player:exit` | phone → server | `{roomId}` |

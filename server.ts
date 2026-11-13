@@ -4,14 +4,15 @@ import { Server, Socket } from 'socket.io';
 import { createRoom, getRoom, deleteRoom, sweepAbandonedRooms } from './src/lib/rooms';
 import { saveFight } from './src/lib/fightStore';
 import { randomSpell, SPELLS } from './src/lib/spells';
-import { validateSubmission, determineWinner } from './src/lib/scoring';
+import { validateSubmission } from './src/lib/scoring';
 import {
   MODES, randomMode, buildChoices, maskSpell, scramblePuzzle, isSolved, PUZZLE, randomPuzzleImage,
   matchWords, lettersFound, spellWordCount, isRpsHand, randomRpsHand, rpsThrowWinner,
-  mathQuestion, MATH_TRAINING_TARGET,
+  mathQuestion, MATH_TRAINING_TARGET, majorityHand,
 } from './src/lib/modes';
+import { TEAMS, MAX_TEAM_SIZE, pickTeam, bothTeamsPresent, teamNames, teamSizes, teamAverages, higherTeam } from './src/lib/teams';
 import { gameScore, gameWinner, isGameOver } from './src/lib/game';
-import type { Room, Player, PlayerColor, Submission, SpellReveal, GameInfo, BattleEnd, RpsHand, RpsResult, RpsSide, MathNext } from './src/types/game';
+import type { Room, Player, PlayerColor, SpellReveal, GameInfo, BattleEnd, RpsHand, RpsResult, RpsSide, MathNext } from './src/types/game';
 
 const dev = process.env.NODE_ENV !== 'production';
 const port = parseInt(process.env.PORT || '3000', 10);
@@ -105,7 +106,7 @@ function endBattle(io: Server, room: Room, winner: Player | null, extra: Record<
   }
   const payload: BattleEnd = {
     winnerColor: winner?.color ?? null,
-    winnerName: winner?.name ?? null,
+    winnerName: winner ? (extra.teamWin ? teamNames(room.players.values())[winner.color] ?? winner.name : winner.name) : null,
     durationMs: winner ? room.submissions.get(winner.socketId)?.durationMs ?? null : null,
     results,
     game: gameInfo(room),
@@ -121,45 +122,95 @@ function endBattle(io: Server, room: Room, winner: Player | null, extra: Record<
 function recordFinishedGame(room: Room, end: BattleEnd) {
   const { game } = end;
   if (room.solo || !game.over || !game.winner) return;
-  const players = Object.values(end.results);
-  const winner = players.find((p) => p.color === game.winner);
-  const loser = players.find((p) => p.color !== game.winner);
-  if (!winner || !loser) return;
-  const loserColor = loser.color;
+  const names = teamNames(Object.values(end.results));
+  const loserColor: PlayerColor = game.winner === 'blue' ? 'red' : 'blue';
+  const winnerName = names[game.winner];
+  const loserName = names[loserColor];
+  if (!winnerName || !loserName) return;
   saveFight({
     id: `${room.id}-${Date.now()}`,
     at: new Date().toISOString(),
-    winner: { name: winner.name, color: winner.color },
-    loser: { name: loser.name, color: loserColor },
-    score: { winner: game.score[winner.color], loser: game.score[loserColor] },
+    winner: { name: winnerName, color: game.winner },
+    loser: { name: loserName, color: loserColor },
+    score: { winner: game.score[game.winner], loser: game.score[loserColor] },
     draws: game.score.draws,
     rounds: game.results.length,
   });
 }
 
 /**
- * A player leaves (Exit button or disconnect). Mid-round it's a forfeit. If the game isn't over,
- * it's cancelled: score cleared and the room goes back to waiting for players.
- * After a finished game nothing is reset, so the other phone keeps its final score table.
+ * A player leaves (Exit button or disconnect). While their team still has someone, the battle goes on.
+ * If their team is now empty: mid-round it's a forfeit, and an unfinished game is cancelled (score cleared,
+ * back to waiting). After a finished game nothing is reset, so the other phones keep the final score table.
  */
 function removePlayer(io: Server, room: Room, socketId: string) {
   const player = room.players.get(socketId);
   if (!player) return;
   io.to(room.id).emit('player:disconnected', { color: player.color, name: player.name });
-  if (room.state === 'playing') {
-    const other = Array.from(room.players.values()).find((p) => p.socketId !== socketId) ?? null;
+  const teamEmptied = !Array.from(room.players.values()).some((p) => p.color === player.color && p.socketId !== socketId);
+  if (room.state === 'playing' && teamEmptied) {
+    const other = Array.from(room.players.values()).find((p) => p.color !== player.color) ?? null;
     endBattle(io, room, other, { forfeit: true });
   }
   room.players.delete(socketId);
-  // Keep a finished versus game so the other phone keeps its table. Training ends with its only player.
-  const keepResult = !room.solo && room.state === 'ended' && isGameOver(room.roundResults, false);
-  if (!keepResult) {
+  const finishedGame = !room.solo && room.state === 'ended' && isGameOver(room.roundResults, false);
+  const cancelled = !finishedGame && (room.solo || teamEmptied);
+  if (cancelled) {
     room.solo = false;
     newGame(room);
     resetRoom(room);
   }
   io.to(room.id).emit('room:update', roomToPayload(room));
-  console.log(`[room ${room.id}] ${player.color} left${keepResult ? '' : ' — game cancelled'}`);
+  console.log(`[room ${room.id}] ${player.color} left${cancelled ? ' — game cancelled' : ''}`);
+  if (cancelled || finishedGame) return;
+  // The others may have been waiting only for this wizard.
+  if (room.state === 'playing') checkRoundComplete(io, room);
+  else if (room.state === 'ended') continueWhenAllReady(io, room);
+  else if (room.state === 'waiting') startWhenAllReady(io, room);
+}
+
+/** Every wizard still in the room is in `ids` (submitted, locked out, picked…). */
+const everyone = (room: Room, ids: { has(id: string): boolean }) => Array.from(room.players.keys()).every((id) => ids.has(id));
+
+/** Speed Cast: the fastest correct wizard wins for their team. */
+function endSpeedCast(io: Server, room: Room) {
+  const fastest = Array.from(room.submissions.values()).sort((a, b) => a.durationMs - b.durationMs)[0];
+  endBattle(io, room, fastest ? room.players.get(fastest.socketId) ?? null : null);
+}
+
+/** After a wizard leaves mid-round: end the round or throw if it was only waiting for them. */
+function checkRoundComplete(io: Server, room: Room) {
+  if (room.mode === 'type' && room.submissions.size > 0 && everyone(room, room.submissions)) return endSpeedCast(io, room);
+  if ((room.mode === 'translate' || room.mode === 'describe') && everyone(room, room.lockedOut)) return endBattle(io, room, null, { allWrong: true });
+  if (room.mode === 'rps' && room.rps.open && everyone(room, room.rps.picks)) resolveRpsThrow(io, room);
+}
+
+const PRE_BATTLE_DELAY_MS = 2000;
+
+/** Waiting room: starts the countdown once every wizard pressed Let's Fight and both teams have someone. */
+function startWhenAllReady(io: Server, room: Room) {
+  const ready = (r: Room) => r.state === 'waiting' && !r.solo && bothTeamsPresent(r.players.values()) && Array.from(r.players.values()).every((p) => p.fightReady);
+  if (!ready(room)) return;
+  console.log(`[room ${room.id}] everyone ready — countdown in 2s`);
+  setTimeout(() => {
+    const r = getRoom(room.id);
+    if (r && ready(r)) startBattle(io, r);
+  }, PRE_BATTLE_DELAY_MS);
+}
+
+/** After a round: once every wizard pressed Next round / Fight again, the next round (or a new game) starts. */
+function continueWhenAllReady(io: Server, room: Room) {
+  if (room.state !== 'ended' || !Array.from(room.players.values()).every((p) => p.rematchReady)) return;
+  if (isGameOver(room.roundResults, room.solo)) newGame(room);
+  resetRoom(room);
+  // Pressing Next round / Fight again already means "ready": screens show "starting" instead of Let's Fight.
+  for (const p of room.players.values()) p.fightReady = true;
+  io.to(room.id).emit('room:update', roomToPayload(room));
+  console.log(`[room ${room.id}] rematch — countdown in 2s`);
+  setTimeout(() => {
+    const r = getRoom(room.id);
+    if (r && r.state === 'waiting') startBattle(io, r);
+  }, PRE_BATTLE_DELAY_MS);
 }
 
 /** Runs fn after ms, unless the round has moved on or ended meanwhile. */
@@ -170,16 +221,21 @@ function laterInRound(room: Room, ms: number, fn: () => void) {
   }, ms);
 }
 
-/** Memorize time limit: nobody completed the spell, so more correct letters wins; equal letters is a draw. */
+/** The team with the higher average `value` wins (through its best wizard); equal averages are a draw. */
+function endOnTeamAverage(io: Server, room: Room, value: (p: Player) => number, extra: Record<string, boolean> = {}, winTimeMs?: number) {
+  const players = Array.from(room.players.values());
+  const team = higherTeam(teamAverages(players, value));
+  const best = players.filter((p) => p.color === team).sort((a, b) => value(b) - value(a))[0];
+  if (!best) return endBattle(io, room, null, { timedOut: true });
+  if (winTimeMs !== undefined) recordWinTime(room, best, winTimeMs);
+  return endBattle(io, room, best, { ...extra, teamWin: true });
+}
+
+/** Memorize time limit: nobody completed the spell, so the team with more correct letters (average) wins. */
 function endMemorizeOnLetters(io: Server, room: Room) {
   // Training: only a completed spell counts as solved.
   if (room.solo) return endBattle(io, room, null, { timedOut: true });
-  const scored = Array.from(room.players.values())
-    .map((p) => ({ p, letters: lettersFound(room.spell.latin, room.foundWords.get(p.socketId) ?? []) }))
-    .sort((a, b) => b.letters - a.letters);
-  const [best, second] = scored;
-  if (best && best.letters > (second?.letters ?? 0)) endBattle(io, room, best.p, { onLetters: true });
-  else endBattle(io, room, null, { timedOut: true });
+  endOnTeamAverage(io, room, (p) => lettersFound(room.spell.latin, room.foundWords.get(p.socketId) ?? []), { onLetters: true });
 }
 
 function drawAfter(io: Server, room: Room, ms: number) {
@@ -191,15 +247,14 @@ function recordWinTime(room: Room, player: Player, durationMs: number) {
   room.submissions.set(player.socketId, { socketId: player.socketId, text: '', submittedAt: Date.now(), spellRevealedAt: room.spellRevealedAt!, durationMs, correct: true, valid: true });
 }
 
-/** MathIsMagic time limit: more right answers wins; equal is a draw. Training passes with MATH_TRAINING_TARGET right. */
+/** MathIsMagic time limit: the team with more right answers (average) wins; equal is a draw. Training passes with MATH_TRAINING_TARGET right. */
 function endMathOnAnswers(io: Server, room: Room) {
-  const [best, second] = Array.from(room.players.values())
-    .map((p) => ({ p, right: room.math.progress.get(p.socketId)?.right ?? 0 }))
-    .sort((a, b) => b.right - a.right);
-  const won = best && (room.solo ? best.right >= MATH_TRAINING_TARGET : best.right > (second?.right ?? 0));
-  if (!won) return endBattle(io, room, null, { timedOut: true });
-  recordWinTime(room, best.p, MATH_LIMIT_MS);
-  endBattle(io, room, best.p);
+  const right = (p: Player) => room.math.progress.get(p.socketId)?.right ?? 0;
+  if (!room.solo) return endOnTeamAverage(io, room, right, {}, MATH_LIMIT_MS);
+  const [player] = room.players.values();
+  if (!player || right(player) < MATH_TRAINING_TARGET) return endBattle(io, room, null, { timedOut: true });
+  recordWinTime(room, player, MATH_LIMIT_MS);
+  endBattle(io, room, player);
 }
 
 function startRpsThrow(io: Server, room: Room) {
@@ -212,14 +267,16 @@ function startRpsThrow(io: Server, room: Room) {
   laterInRound(room, RPS_PICK_MS, () => { if (rps.throw === n) resolveRpsThrow(io, room); });
 }
 
-/** Ends the current throw (both picked, or time is up): shows both hands, then the next throw or the round result. */
+/** Ends the current throw (everyone picked, or time is up): shows both hands, then the next throw or the round result. */
 function resolveRpsThrow(io: Server, room: Room) {
   const rps = room.rps;
   if (!rps.open) return;
   rps.open = false;
-  // Two sides: both players, or the one player against the computer wizard.
-  const sides: Array<{ id: string; side: RpsSide; hand: RpsHand | null }> = Array.from(room.players.values())
-    .map((p) => ({ id: p.socketId, side: p.color, hand: rps.picks.get(p.socketId) ?? null }));
+  const players = Array.from(room.players.values());
+  // Each team throws its most-picked hand. Training: the one wizard against the computer wizard.
+  const teamHand = (c: PlayerColor) => majorityHand(players.filter((p) => p.color === c).flatMap((p) => rps.picks.get(p.socketId) ?? []));
+  const colors: PlayerColor[] = room.solo ? players.map((p) => p.color) : TEAMS;
+  const sides: Array<{ id: string; side: RpsSide; hand: RpsHand | null }> = colors.map((c) => ({ id: c, side: c, hand: teamHand(c) }));
   if (room.solo) sides.push({ id: CPU, side: CPU, hand: randomRpsHand() });
   const [a, b] = sides;
   const w = rpsThrowWinner(a.hand, b.hand);
@@ -238,9 +295,10 @@ function resolveRpsThrow(io: Server, room: Room) {
   const roundWinner = winner && (rps.wins.get(winner.id) ?? 0) >= RPS_WINS_NEEDED ? winner : null;
   laterInRound(room, RPS_SHOW_MS, () => {
     if (roundWinner) {
-      const player = room.players.get(roundWinner.id) ?? null; // null: the computer wizard won (training)
+      // A member of the winning team; none when the computer wizard won (training).
+      const player = Array.from(room.players.values()).find((p) => p.color === roundWinner.id) ?? null;
       if (player) recordWinTime(room, player, Date.now() - room.spellRevealedAt!);
-      return endBattle(io, room, player);
+      return endBattle(io, room, player, room.solo ? {} : { teamWin: true });
     }
     if (rps.idleThrows >= RPS_MAX_IDLE_THROWS) return endBattle(io, room, null, { timedOut: true });
     startRpsThrow(io, room);
@@ -293,7 +351,7 @@ function revealSpell(io: Server, room: Room) {
 }
 
 function startBattle(io: Server, room: Room) {
-  if (room.state !== 'waiting' || room.players.size < (room.solo ? 1 : room.maxPlayers)) return;
+  if (room.state !== 'waiting' || (room.solo ? room.players.size < 1 : !bothTeamsPresent(room.players.values()))) return;
 
   room.round++;
   room.state = 'countdown';
@@ -397,25 +455,14 @@ app.prepare().then(() => {
         if (cb) cb({ success: false, error: 'Battle already started' });
         return;
       }
-      if (room.state === 'ended' && room.players.size >= room.maxPlayers) {
-        if (cb) cb({ success: false, error: 'Room is full (max 2 players)' });
+      // Between rounds of an unfinished game nobody can join; after a finished game a new one starts.
+      if (room.state === 'ended' && !isGameOver(room.roundResults, false)) {
+        if (cb) cb({ success: false, error: 'A game is in progress. Try again when it ends.' });
         return;
       }
-      if (room.state === 'waiting' && room.players.size >= room.maxPlayers) {
-        if (cb) cb({ success: false, error: 'Room is full (max 2 players)' });
-        return;
-      }
-
-      const colors: PlayerColor[] = ['blue', 'red'];
-      const usedColors = new Set(room.players.values().map((p) => p.color));
-      let color: PlayerColor | undefined;
-      if (payload.color && !usedColors.has(payload.color)) {
-        color = payload.color;
-      } else {
-        color = colors.find((c) => !usedColors.has(c));
-      }
+      const color = room.players.size < room.maxPlayers ? pickTeam(room.players.values(), payload.color) : null;
       if (!color) {
-        if (cb) cb({ success: false, error: 'Room is full (max 2 players)' });
+        if (cb) cb({ success: false, error: `Room is full (max ${room.maxPlayers} wizards)` });
         return;
       }
       const name = payload.name?.trim() || (color === 'blue' ? 'Blue Wizard' : 'Red Wizard');
@@ -438,9 +485,29 @@ app.prepare().then(() => {
         io.to(room.id).emit('room:update', roomToPayload(room));
       }
 
-      if (room.players.size >= room.maxPlayers && room.state === 'waiting') {
-        console.log(`[room ${room.id}] both players joined — waiting for Let's Fight`);
+    });
+
+    // Waiting room: a wizard who hasn't pressed Let's Fight can move to the other team, if it has room.
+    socket.on('player:team', (payload: { roomId: string; color: PlayerColor }, cb?: (result: { success: boolean; error?: string }) => void) => {
+      const room = getRoom(payload?.roomId);
+      const player = room?.players.get(socket.id);
+      if (!room || !player || room.state !== 'waiting' || room.solo || player.fightReady) {
+        if (cb) cb({ success: false, error: "You can change team until you press Let's Fight" });
+        return;
       }
+      if (!TEAMS.includes(payload.color)) {
+        if (cb) cb({ success: false, error: 'Unknown team' });
+        return;
+      }
+      if (payload.color !== player.color && teamSizes(room.players.values())[payload.color] >= MAX_TEAM_SIZE) {
+        if (cb) cb({ success: false, error: `That team is full (max ${MAX_TEAM_SIZE} wizards)` });
+        return;
+      }
+      player.color = payload.color;
+      io.to(room.id).emit('room:update', roomToPayload(room));
+      console.log(`[room ${room.id}] ${player.name} switched to ${player.color}`);
+      if (cb) cb({ success: true });
+      startWhenAllReady(io, room);
     });
 
     socket.on('player:name', (payload: { roomId: string; name: string }, cb?: (result: { success: boolean; error?: string }) => void) => {
@@ -477,17 +544,7 @@ app.prepare().then(() => {
       console.log(`[room ${room.id}] ${player.color} pressed Let's Fight`);
       io.to(room.id).emit('room:update', roomToPayload(room));
 
-      const allReady = Array.from(room.players.values()).every((p) => p.fightReady);
-      if (allReady && room.players.size >= room.maxPlayers) {
-        console.log(`[room ${room.id}] both ready — countdown in 2s`);
-        setTimeout(() => {
-          const r = getRoom(room.id);
-          if (r && r.state === 'waiting' && Array.from(r.players.values()).every((p) => p.fightReady)) {
-            startBattle(io, r);
-          }
-        }, 2000);
-      }
-
+      startWhenAllReady(io, room);
       if (cb) cb({ success: true });
     });
 
@@ -519,7 +576,7 @@ app.prepare().then(() => {
       if (room.mode === 'rps') {
         if (!room.rps.open || room.rps.picks.has(socket.id) || !isRpsHand(payload.text)) return;
         room.rps.picks.set(socket.id, payload.text);
-        if (room.rps.picks.size >= room.players.size) resolveRpsThrow(io, room);
+        if (everyone(room, room.rps.picks)) resolveRpsThrow(io, room);
         return;
       }
 
@@ -564,23 +621,19 @@ app.prepare().then(() => {
         if (isChoice) room.lockedOut.add(socket.id);
         io.to(socket.id).emit('spell:submitted', { correct: false, durationMs, lockedOut: isChoice });
         console.log(`[room ${room.id}] ${player.color} wrong: "${payload.text}"`);
-        if (isChoice && room.lockedOut.size >= room.players.size) endBattle(io, room, null, { allWrong: true });
+        if (isChoice && everyone(room, room.lockedOut)) endBattle(io, room, null, { allWrong: true });
         return;
       }
 
-      const submission: Submission = { socketId: socket.id, text: payload.text, submittedAt, spellRevealedAt: room.spellRevealedAt, durationMs, correct, valid: true };
+      const submission = { socketId: socket.id, text: payload.text, submittedAt, spellRevealedAt: room.spellRevealedAt, durationMs, correct, valid: true };
       room.submissions.set(socket.id, submission);
       console.log(`[room ${room.id}] ${player.color} correct: duration=${durationMs}ms`);
       io.to(socket.id).emit('spell:submitted', { correct: true, durationMs });
 
-      // Only Speed Cast waits for the opponent; every other mode ends on the first correct answer.
+      // Only Speed Cast waits for the others; every other mode ends on the first correct answer.
       if (room.mode !== 'type') return endBattle(io, room, player);
 
-      if (room.submissions.size >= room.players.size) {
-        const result = determineWinner(room.submissions, room.players);
-        const winner = Array.from(room.players.values()).find((p) => p.color === result.winnerColor) ?? null;
-        return endBattle(io, room, winner);
-      }
+      if (everyone(room, room.submissions)) return endSpeedCast(io, room);
 
       if (!room.graceTimerStarted) {
         room.graceTimerStarted = true;
@@ -608,19 +661,8 @@ app.prepare().then(() => {
       const gameOver = isGameOver(room.roundResults, room.solo);
       console.log(`[room ${room.id}] ${player.color} pressed ${gameOver ? 'Fight/Train again' : 'Next round'}`);
 
-      const allReady = Array.from(room.players.values()).every((p) => p.rematchReady);
-
-      if (allReady) {
-        if (gameOver) newGame(room);
-        resetRoom(room);
-        // Pressing Next round / Fight again already means "ready": screens show "starting" instead of Let's Fight.
-        for (const p of room.players.values()) p.fightReady = true;
-        io.to(room.id).emit('room:update', roomToPayload(room));
-        console.log(`[room ${room.id}] rematch — countdown in 2s`);
-        setTimeout(() => {
-          const r = getRoom(room.id);
-          if (r && r.state === 'waiting') startBattle(io, r);
-        }, 2000);
+      if (Array.from(room.players.values()).every((p) => p.rematchReady)) {
+        continueWhenAllReady(io, room);
       } else {
         io.to(room.id).emit('room:update', roomToPayload(room));
         const waitingFor = Array.from(room.players.values()).filter((p) => !p.rematchReady);

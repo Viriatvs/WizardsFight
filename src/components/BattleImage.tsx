@@ -41,7 +41,7 @@ export default function BattleImage({ blueJoined, redJoined, countdown, battleSt
         <div className="absolute top-4 left-1/2 -translate-x-1/2">
           <div className="bg-black/60 backdrop-blur-sm px-6 py-3 rounded-2xl border border-amber-500/30">
             <span className="text-amber-400 text-lg font-bold uppercase tracking-wider animate-pulse">
-              Waiting for opponent…
+              Waiting for the other team…
             </span>
           </div>
         </div>
@@ -65,7 +65,7 @@ export default function BattleImage({ blueJoined, redJoined, countdown, battleSt
         <div className="absolute top-4 left-1/2 -translate-x-1/2">
           <div className="bg-black/70 backdrop-blur-sm px-8 py-3 rounded-2xl border border-amber-500/50">
             <span className="text-amber-300 text-xl font-bold uppercase tracking-wider animate-pulse">
-              Both Wizards Ready — Start Battle!
+              Both Teams Here — Press Let&apos;s Fight!
             </span>
           </div>
         </div>

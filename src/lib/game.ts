@@ -1,5 +1,6 @@
 // Game rules: a game is a series of rounds. Pure and shared by server and client.
 import { MATH_TRAINING_TARGET } from './modes';
+import { teamAverages, formatAverage } from './teams';
 import type { PlayerColor, RoundResults, GameScore, BattleEnd } from '@/types/game';
 
 export type { RoundResults, GameScore };
@@ -62,13 +63,14 @@ export function drawReason(end: Pick<BattleEnd, 'allWrong' | 'mode' | 'results'>
     if (end.mode === 'math') return `Fewer than ${MATH_TRAINING_TARGET} right answers`;
     return 'Time ran out';
   }
-  if (end.allWrong) return 'Both wizards chose wrong';
+  if (end.allWrong) return 'Every wizard chose wrong';
   if (end.mode === 'puzzle') return 'Nobody finished the puzzle in time';
   if (end.mode === 'rps') return 'Nobody picked in time';
-  if (end.mode === 'math') return `Same number of right answers (${Object.values(end.results)[0]?.rightAnswers ?? 0})`;
+  const results = Object.values(end.results);
+  if (end.mode === 'math') return `Same number of right answers (${formatAverage(teamAverages(results, (r) => r.rightAnswers ?? 0).blue)})`;
   if (end.mode === 'memorize') {
-    const letters = Object.values(end.results).map((r) => r.letters ?? 0);
-    return letters.some((l) => l > 0) ? `Same number of correct letters (${letters[0]})` : 'Nobody remembered a word';
+    const letters = teamAverages(results, (r) => r.letters ?? 0).blue;
+    return letters > 0 ? `Same number of correct letters (${formatAverage(letters)})` : 'Nobody remembered a word';
   }
   return 'No valid spell cast in time';
 }
@@ -77,13 +79,16 @@ export function drawReason(end: Pick<BattleEnd, 'allWrong' | 'mode' | 'results'>
 export function winDetail(end: Pick<BattleEnd, 'onLetters' | 'winnerColor' | 'results'> & { mode?: BattleEnd['mode'] }): string | null {
   if (!end.winnerColor) return null;
   const results = Object.values(end.results);
+  // Team averages (a one-wizard team's average is just that wizard's count).
+  const versus = (value: (r: (typeof results)[number]) => number) => {
+    const avg = teamAverages(results, value);
+    const loser = end.winnerColor === 'blue' ? 'red' : 'blue';
+    return `${formatAverage(avg[end.winnerColor!])} vs ${formatAverage(avg[loser])}`;
+  };
   if (end.mode === 'math') {
-    const mine = results.find((r) => r.color === end.winnerColor)?.rightAnswers ?? 0;
-    const theirs = results.find((r) => r.color !== end.winnerColor);
-    return theirs ? `Right answers: ${mine} vs ${theirs.rightAnswers ?? 0}` : `${mine} right answers`;
+    const solo = results.every((r) => r.color === end.winnerColor);
+    return solo ? `${results[0]?.rightAnswers ?? 0} right answers` : `Right answers: ${versus((r) => r.rightAnswers ?? 0)}`;
   }
   if (!end.onLetters) return null;
-  const mine = results.find((r) => r.color === end.winnerColor)?.letters ?? 0;
-  const theirs = results.find((r) => r.color !== end.winnerColor)?.letters ?? 0;
-  return `Won on letters: ${mine} vs ${theirs}`;
+  return `Won on letters: ${versus((r) => r.letters ?? 0)}`;
 }

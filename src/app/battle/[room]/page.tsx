@@ -12,6 +12,7 @@ import CopyLinkButton from '@/components/CopyLinkButton';
 import TrainingSummary from '@/components/TrainingSummary';
 import { MODE_LABELS } from '@/lib/modes';
 import { roundLabel, drawReason, winDetail, trainingSummary, formatSeconds } from '@/lib/game';
+import { TEAMS, MAX_TEAM_SIZE, bothTeamsPresent, teamNames } from '@/lib/teams';
 import type { PlayerColor, BattleMode, BattleEnd, GameInfo, GameScore } from '@/types/game';
 
 /** Where to send visitors of a room that no longer exists. The start page shows a notice for it. */
@@ -29,9 +30,8 @@ interface RoomData {
   game: GameInfo;
 }
 
-function namesFrom(results: BattleEnd['results']): Partial<Record<PlayerColor, string>> {
-  return Object.fromEntries(Object.values(results).map((r) => [r.color, r.name]));
-}
+/** Team names ("Merlin & Ana") per color, from a round's results. */
+const namesFrom = (results: BattleEnd['results']) => teamNames(Object.values(results));
 
 const scoreLine = (s: GameScore) => `${s.blue} – ${s.red}${s.draws ? ` (${s.draws} draw${s.draws > 1 ? 's' : ''})` : ''}`;
 
@@ -146,9 +146,10 @@ export default function BattlePage({ params }: { params: Promise<{ room: string 
     ? `${window.location.origin}/play/${roomId}`
     : `/play/${roomId}`;
 
-  const bluePlayer = room?.players.find((p) => p.color === 'blue');
-  const redPlayer = room?.players.find((p) => p.color === 'red');
-  const canStart = room?.state === 'waiting' && room?.playerCount === room?.maxPlayers;
+  const members = (c: PlayerColor) => room?.players.filter((p) => p.color === c) ?? [];
+  const teamsPresent = bothTeamsPresent(room?.players ?? []);
+  const canStart = room?.state === 'waiting' && teamsPresent;
+  const readyCount = room?.players.filter((p) => p.fightReady).length ?? 0;
   const game = room?.game;
   const gameOverWaiting = room?.state === 'ended' && !!game?.over && !battleEnd;
   const training = !!game?.training;
@@ -156,6 +157,7 @@ export default function BattlePage({ params }: { params: Promise<{ room: string 
   const playUrl = (c: string) => typeof window !== 'undefined' ? `${window.location.origin}/play/${roomId}?color=${c}` : '';
 
   const resultFor = (c: PlayerColor) => (battleEnd ? Object.values(battleEnd.results).find((r) => r.color === c) ?? null : null);
+  const wizards = (n: number) => `${n} wizard${n === 1 ? '' : 's'}`;
 
   const endTitle = (end: BattleEnd) => {
     const label = roundLabel(end.game.round, end.game.training);
@@ -215,7 +217,7 @@ export default function BattlePage({ params }: { params: Promise<{ room: string 
         </div>
       )}
 
-      {/* Between rounds: the score until both wizards press Next round. */}
+      {/* Between rounds: the score until every wizard presses Next round. */}
       {battleEnd && !animating && !battleEnd.game.over && !battleEnd.game.training && (
         <div className="fixed inset-0 z-40 flex items-center justify-center bg-gray-950/95 px-4 animate-fade-in">
           <div className="w-full max-w-3xl text-center">
@@ -226,7 +228,7 @@ export default function BattlePage({ params }: { params: Promise<{ room: string 
               {battleEnd.winnerColor ? `${battleEnd.winnerName} won the round${winDetail(battleEnd) ? ` (${winDetail(battleEnd)!.toLowerCase()})` : ""}` : `Draw — ${drawReason(battleEnd).toLowerCase()}`}
             </p>
             <ScoreTable names={namesFrom(battleEnd.results)} score={battleEnd.game.score} results={battleEnd.game.results} large />
-            <p className="text-gray-400 text-lg mt-8 animate-pulse">Next round starts when both wizards press Next round on their phones…</p>
+            <p className="text-gray-400 text-lg mt-8 animate-pulse">Next round starts when every wizard presses Next round on their phone…</p>
           </div>
         </div>
       )}
@@ -266,8 +268,8 @@ export default function BattlePage({ params }: { params: Promise<{ room: string 
 
         <div className="mb-8">
           <BattleImage
-            blueJoined={!!bluePlayer}
-            redJoined={!!redPlayer}
+            blueJoined={members('blue').length > 0}
+            redJoined={members('red').length > 0}
             countdown={countdown}
             battleStarted={battleStarted}
           />
@@ -286,19 +288,18 @@ export default function BattlePage({ params }: { params: Promise<{ room: string 
           </div>
 
           <div className="flex flex-col gap-4 w-full max-w-xs">
-            {(['blue', 'red'] as const).map((c) => {
-              const player = c === 'blue' ? bluePlayer : redPlayer;
+            {TEAMS.map((c) => {
+              const team = members(c);
               return (
                 <PlayerCard
                   key={c}
                   color={c}
-                  name={player?.name}
-                  joined={!!player}
-                  connected={!battleEnd && !!player}
+                  members={team.map((p) => ({ name: p.name, ready: room?.state === 'waiting' && p.fightReady }))}
+                  connected={!battleEnd && team.length > 0}
                   result={resultFor(c)}
                   isWinner={battleEnd?.winnerColor === c}
                   wins={game && !gameOverWaiting ? game.score[c] : 0}
-                  joinUrl={!player ? playUrl(c) : undefined}
+                  joinUrl={!training && room?.state === 'waiting' && team.length < MAX_TEAM_SIZE ? playUrl(c) : undefined}
                 />
               );
             })}
@@ -316,25 +317,25 @@ export default function BattlePage({ params }: { params: Promise<{ room: string 
             <div className="text-gray-500 text-lg animate-pulse">Connecting…</div>
           )}
 
-          {connected && room && !training && (room.state === 'waiting' || gameOverWaiting) && room.playerCount < 2 && (
+          {connected && room && !training && (room.state === 'waiting' || gameOverWaiting) && !teamsPresent && (
             <div className="text-gray-400 text-lg">
-              <span className="text-amber-400 font-bold">{room.playerCount}/2</span> players connected — waiting for opponent
+              <span className="text-amber-400 font-bold">{wizards(room.playerCount)}</span> connected — waiting for a wizard on each team (up to {room.maxPlayers})
             </div>
           )}
 
           {canStart && !battleEnd && (
-            room.players.every((p) => p.fightReady) ? (
-              <div className="text-amber-300 text-2xl font-bold uppercase tracking-wider animate-pulse">⚔️ Both wizards ready — battle starting…</div>
+            readyCount === room.playerCount ? (
+              <div className="text-amber-300 text-2xl font-bold uppercase tracking-wider animate-pulse">⚔️ Every wizard ready — battle starting…</div>
             ) : (
               <div className="text-amber-300 text-2xl font-bold uppercase tracking-wider">
-                ⚔️ Both wizards present — press <span className="text-amber-400 underline">Let&apos;s Fight</span> on each phone
+                ⚔️ {readyCount}/{room.playerCount} ready — press <span className="text-amber-400 underline">Let&apos;s Fight</span> on every phone
               </div>
             )
           )}
 
-          {gameOverWaiting && !training && room.playerCount === 2 && (
+          {gameOverWaiting && !training && teamsPresent && (
             <div className="text-amber-300 text-2xl font-bold uppercase tracking-wider">
-              Game over — press <span className="text-amber-400 underline">Fight again</span> on both phones for a new game
+              Game over — press <span className="text-amber-400 underline">Fight again</span> on every phone for a new game
             </div>
           )}
 

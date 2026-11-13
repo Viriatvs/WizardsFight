@@ -12,10 +12,17 @@ import RpsInput from '@/components/RpsInput';
 import MathInput from '@/components/MathInput';
 import { MODE_LABELS, fillWords } from '@/lib/modes';
 import { roundLabel } from '@/lib/game';
+import { TEAMS, MAX_TEAM_SIZE, bothTeamsPresent, otherTeam, teamSizes } from '@/lib/teams';
 import type { PlayerColor, GamePhase, BattleMode, SpellReveal, GameInfo, BattleEnd, RpsThrow, RpsResult, MathQuestion, MathNext } from '@/types/game';
 
 /** Where to send visitors of a room that no longer exists. The start page shows a notice for it. */
 const ROOM_EXPIRED_URL = '/?expired=1';
+
+/** room:update player entry. */
+interface RoomPlayer { color: PlayerColor; name: string; socketId: string; fightReady: boolean; rematchReady: boolean }
+
+const TEAM_LABEL: Record<PlayerColor, string> = { blue: '🔵 Blue team', red: '🔴 Red team' };
+const TEAM_TEXT: Record<PlayerColor, string> = { blue: 'text-blue-400', red: 'text-red-400' };
 
 /** Memorize: this player's correctly typed words (index → word), from spell:progress. */
 interface WordProgress { words: Record<number, string>; found: number; total: number }
@@ -62,8 +69,8 @@ export default function PlayPage({ params }: { params: Promise<{ room: string }>
   const colorRef = useRef<PlayerColor | null>(null);
   const [nameReady, setNameReady] = useState(false);
   const [fightReady, setFightReady] = useState(false);
-  const [bothReady, setBothReady] = useState(false);
-  const [playerCount, setPlayerCount] = useState(0);
+  const [players, setPlayers] = useState<RoomPlayer[]>([]);
+  const [mySocketId, setMySocketId] = useState<string | null>(null);
   const [game, setGame] = useState<GameInfo | null>(null);
   /** This player pressed Next round / Fight again and waits for the opponent. */
   const [continueReady, setContinueReady] = useState(false);
@@ -98,7 +105,7 @@ export default function PlayPage({ params }: { params: Promise<{ room: string }>
       });
     });
 
-    socket.on('room:update', (data: { state: string; mode: BattleMode | null; game: GameInfo; players: Array<{ color: string; fightReady: boolean; rematchReady: boolean }> }) => {
+    socket.on('room:update', (data: { state: string; mode: BattleMode | null; game: GameInfo; players: RoomPlayer[] }) => {
       setMode(data.mode);
       setGame(data.game);
       if (data.state === 'countdown') {
@@ -119,15 +126,16 @@ export default function PlayPage({ params }: { params: Promise<{ room: string }>
         setGraceSeconds(null);
         setBattleEnd(null);
       }
-      const me = data.players.find((p) => p.color === colorRef.current);
+      // Found by socket id: the team (color) can change in the waiting room.
+      const me = data.players.find((p) => p.socketId === socket.id);
       if (me) {
+        colorRef.current = me.color;
+        setColor(me.color);
         setFightReady(me.fightReady);
         setContinueReady(me.rematchReady);
       }
-      setPlayerCount(data.players.length);
-      setBothReady(
-        data.players.length >= 2 && data.players.every((p) => p.fightReady),
-      );
+      setMySocketId(socket.id ?? null);
+      setPlayers(data.players);
     });
 
     socket.on('countdown', (data: { seconds: number }) => {
@@ -276,10 +284,23 @@ export default function PlayPage({ params }: { params: Promise<{ room: string }>
     });
   }, [roomId]);
 
+  const switchTeam = useCallback((to: PlayerColor) => {
+    setError(null);
+    socketRef.current?.emit('player:team', { roomId, color: to }, (res: { success: boolean; error?: string }) => {
+      if (!res.success) setError(res.error || 'Could not change team');
+    });
+  }, [roomId]);
+
   const exitRoom = useCallback(() => {
     socketRef.current?.emit('player:exit', { roomId });
     window.location.href = '/';
   }, [roomId]);
+
+  const playerCount = players.length;
+  const teamsReady = bothTeamsPresent(players);
+  const allReady = teamsReady && players.every((p) => p.fightReady);
+  const sizes = teamSizes(players);
+  const teamMode = playerCount > 2;
 
   const colorClass = color === 'blue' ? 'text-blue-400' : color === 'red' ? 'text-red-400' : 'text-gray-400';
   const colorBg = color === 'blue' ? 'bg-blue-500/10 border-blue-500' : color === 'red' ? 'bg-red-500/10 border-red-500' : 'bg-gray-500/10 border-gray-500';
@@ -313,7 +334,7 @@ export default function PlayPage({ params }: { params: Promise<{ room: string }>
           {color && (
             <div className={`inline-block mt-2 px-4 py-1 rounded-full border ${colorBg}`}>
               <span className={`font-bold text-sm uppercase tracking-wider ${colorClass}`}>
-                You are {color === 'blue' ? '🔵 Blue' : '🔴 Red'}
+                {TEAM_LABEL[color]}
               </span>
             </div>
           )}
@@ -359,18 +380,29 @@ export default function PlayPage({ params }: { params: Promise<{ room: string }>
             <div className="text-5xl mb-4 animate-bounce inline-block">🧙</div>
             {game?.training ? (
               <p className="text-amber-300 text-lg font-bold">Training alone — starting…</p>
-            ) : bothReady ? (
-              <p className="text-amber-300 text-lg font-bold">Both wizards ready — battle starting…</p>
+            ) : allReady ? (
+              <p className="text-amber-300 text-lg font-bold">Every wizard is ready — battle starting…</p>
             ) : fightReady ? (
-              <p className="text-gray-300 text-lg font-medium">Ready! Waiting for your opponent to press Let&apos;s Fight…</p>
+              <p className="text-gray-300 text-lg font-medium">
+                {teamsReady ? 'Ready! Waiting for the other wizards to press Let\u2019s Fight…' : 'Ready! Waiting for a wizard to join the other team…'}
+              </p>
             ) : (
               <div className="max-w-xs mx-auto">
-                <button onClick={pressFight} disabled={playerCount < 2} className="btn-pixel w-full py-4 text-xl">
+                <button onClick={pressFight} disabled={!teamsReady} className="btn-pixel w-full py-4 text-xl">
                   ⚔️ Let&apos;s Fight
                 </button>
                 <p className="text-gray-400 text-sm mt-5">
-                  {playerCount < 2 ? 'Waiting for an opponent to join…' : 'Press when you are ready to duel'}
+                  {!teamsReady ? 'Waiting for a wizard on the other team…' : 'Press when you are ready to duel. After that your team is locked.'}
                 </p>
+                {color && playerCount > 1 && (
+                  <button
+                    onClick={() => switchTeam(otherTeam(color))}
+                    disabled={sizes[otherTeam(color)] >= MAX_TEAM_SIZE}
+                    className="btn-pixel-secondary mt-6 w-full"
+                  >
+                    Switch to {TEAM_LABEL[otherTeam(color)]}
+                  </button>
+                )}
                 {/* Only on pages opened from the main screen's wizard cards (?color=), while nobody else is here. */}
                 {preferredColor && playerCount === 1 && (
                   <>
@@ -388,7 +420,23 @@ export default function PlayPage({ params }: { params: Promise<{ room: string }>
                 )}
               </div>
             )}
-            {notice && <p role="status" className="text-amber-300 text-sm mt-4">{notice}. A new opponent can join with the QR code.</p>}
+            {!game?.training && playerCount > 1 && (
+              <div className="grid grid-cols-2 gap-3 mt-8 text-left" aria-label="Teams">
+                {TEAMS.map((t) => (
+                  <div key={t}>
+                    <h3 className={`font-pixel text-xs uppercase tracking-widest mb-2 ${TEAM_TEXT[t]}`}>{TEAM_LABEL[t]} ({sizes[t]}/{MAX_TEAM_SIZE})</h3>
+                    <ul className="text-sm text-gray-200 space-y-1">
+                      {players.filter((p) => p.color === t).map((p) => (
+                        <li key={p.socketId} className="truncate">
+                          {p.fightReady ? '✓ ' : ''}{p.name}{p.socketId === mySocketId ? ' (you)' : ''}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ))}
+              </div>
+            )}
+            {notice && <p role="status" className="text-amber-300 text-sm mt-4">{notice}. New wizards can join with the QR code.</p>}
             {error && <p role="alert" className="text-red-400 text-sm mt-4">{error}</p>}
           </div>
         )}
@@ -417,6 +465,7 @@ export default function PlayPage({ params }: { params: Promise<{ room: string }>
           <RpsInput
             myColor={color}
             training={!!game?.training}
+            teamMode={teamMode}
             winsNeeded={reveal.winsNeeded}
             current={rpsThrow}
             result={rpsResult}
@@ -452,7 +501,7 @@ export default function PlayPage({ params }: { params: Promise<{ room: string }>
             end={battleEnd}
             myColor={color}
             waiting={continueReady}
-            opponentPresent={playerCount >= 2}
+            opponentPresent={!!color && players.some((p) => p.color !== color)}
             onContinue={pressContinue}
             onExit={exitRoom}
             onStopTraining={stopTraining}

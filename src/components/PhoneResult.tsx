@@ -4,6 +4,7 @@ import ScoreTable from '@/components/ScoreTable';
 import { VICTORY_GIF } from '@/components/VictoryAnimation';
 import TrainingSummary from '@/components/TrainingSummary';
 import { roundLabel, drawReason, winDetail, formatSeconds } from '@/lib/game';
+import { teamNames } from '@/lib/teams';
 import type { BattleEnd, PlayerColor } from '@/types/game';
 
 interface PhoneResultProps {
@@ -68,7 +69,9 @@ export default function PhoneResult(props: PhoneResultProps) {
   const { end, myColor, waiting, opponentPresent, onContinue, onExit, error } = props;
   if (end.game.training) return <TrainingResult {...props} />;
 
-  const names = Object.fromEntries(Object.values(end.results).map((r) => [r.color, r.name])) as Partial<Record<PlayerColor, string>>;
+  const names = teamNames(Object.values(end.results));
+  const teamMode = Object.keys(end.results).length > 2;
+  const others = teamMode ? 'the other team' : 'your opponent';
   const gameWinner = end.game.winner;
   const gameOver = end.game.over && !!gameWinner;
   const continueLabel = gameOver ? 'Fight again' : 'Next round';
@@ -91,7 +94,7 @@ export default function PhoneResult(props: PhoneResultProps) {
             </div>
           </div>
           <div className={`text-2xl font-black mt-4 ${myColor === gameWinner ? 'text-amber-400 animate-bounce' : 'text-gray-400'}`}>
-            {myColor === gameWinner ? '🎉 You win the game! 🎉' : 'You lost the game'}
+            {myColor === gameWinner ? `🎉 ${teamMode ? 'Your team wins' : 'You win'} the game! 🎉` : `${teamMode ? 'Your team' : 'You'} lost the game`}
           </div>
         </>
       ) : (
@@ -102,11 +105,11 @@ export default function PhoneResult(props: PhoneResultProps) {
               <div className={`text-4xl font-black break-words ${COLOR_TEXT[end.winnerColor]}`}>{end.winnerName}</div>
               <div className="text-gray-300 text-lg mt-1">wins the round</div>
               <div className={`text-xl font-bold mt-3 ${myColor === end.winnerColor ? 'text-amber-400' : 'text-gray-500'}`}>
-                {myColor === end.winnerColor ? '🎉 Round won!' : 'Round lost'}
+                {myColor === end.winnerColor ? `🎉 ${teamMode ? 'Your team won the round!' : 'Round won!'}` : 'Round lost'}
               </div>
               {end.durationMs !== null && <div className="text-gray-400 font-mono mt-2">⚡ {end.durationMs.toLocaleString()} ms</div>}
-              {end.graceTimeout && <p className="text-gray-400 text-sm mt-1">Opponent did not cast in time</p>}
-              {end.forfeit && <p className="text-gray-400 text-sm mt-1">Opponent left the battle</p>}
+              {end.graceTimeout && <p className="text-gray-400 text-sm mt-1">{teamMode ? 'The others' : 'Opponent'} did not cast in time</p>}
+              {end.forfeit && <p className="text-gray-400 text-sm mt-1">{teamMode ? 'The other team' : 'Opponent'} left the battle</p>}
               {winDetail(end) && <p className="text-gray-300 font-mono mt-2">{winDetail(end)}</p>}
             </>
           ) : (
@@ -123,10 +126,10 @@ export default function PhoneResult(props: PhoneResultProps) {
         <ScoreTable names={names} score={end.game.score} results={end.game.results} winner={gameWinner} />
       </div>
 
-      {gameOver && !opponentPresent && <p className="text-gray-400 text-sm mt-4">Your opponent left the room.</p>}
+      {gameOver && !opponentPresent && <p className="text-gray-400 text-sm mt-4">{others[0].toUpperCase() + others.slice(1)} left the room.</p>}
 
       {waiting ? (
-        <p className="text-amber-300 font-bold mt-8 animate-pulse">Waiting for your opponent to press {continueLabel}…</p>
+        <p className="text-amber-300 font-bold mt-8 animate-pulse">Waiting for {teamMode ? 'the other wizards' : 'your opponent'} to press {continueLabel}…</p>
       ) : (
         <div className="mt-8 flex flex-wrap gap-5 justify-center">
           <button onClick={onContinue} className="btn-pixel">

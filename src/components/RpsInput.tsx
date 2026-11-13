@@ -8,6 +8,8 @@ import type { PlayerColor, RpsHand, RpsResult, RpsSide } from '@/types/game';
 interface RpsInputProps {
   myColor: PlayerColor | null;
   training: boolean;
+  /** More than one wizard per team: hands are team hands. */
+  teamMode?: boolean;
   winsNeeded: number;
   /** The throw being played and the local time its picks close. */
   current: { throw: number; deadline: number } | null;
@@ -18,7 +20,7 @@ interface RpsInputProps {
 
 const TICK_MS = 100;
 
-export default function RpsInput({ myColor, training, winsNeeded, current, result, onPick }: RpsInputProps) {
+export default function RpsInput({ myColor, training, teamMode, winsNeeded, current, result, onPick }: RpsInputProps) {
   const [picked, setPicked] = useState<{ throw: number; hand: RpsHand } | null>(null);
   const [now, setNow] = useState(() => Date.now());
 
@@ -32,7 +34,8 @@ export default function RpsInput({ myColor, training, winsNeeded, current, resul
   const myPick = picked?.throw === throwNo ? picked.hand : null;
   const me: RpsSide | null = myColor;
   const them: RpsSide = training ? 'cpu' : myColor === 'blue' ? 'red' : 'blue';
-  const themName = training ? 'Computer' : 'Opponent';
+  const themName = training ? 'Computer' : teamMode ? 'Other team' : 'Opponent';
+  const meName = teamMode ? 'Your team' : 'You';
   const secondsLeft = current ? Math.max(0, Math.ceil((current.deadline - now) / 1000)) : null;
 
   const pick = (hand: RpsHand) => {
@@ -46,7 +49,7 @@ export default function RpsInput({ myColor, training, winsNeeded, current, resul
 
   const verdict = !finished ? null
     : finished.winner === null ? 'Tie! Throw again'
-    : finished.winner === me ? 'You win the throw!'
+    : finished.winner === me ? `${meName} ${teamMode ? 'wins' : 'win'} the throw!`
     : `${themName} wins the throw`;
 
   const handBox = (hand: RpsHand | null | undefined, who: string) => (
@@ -65,7 +68,7 @@ export default function RpsInput({ myColor, training, winsNeeded, current, resul
           Throw {throwNo || 1} · first to {winsNeeded} wins
         </div>
         <div className="mt-2 text-2xl font-black" aria-live="polite">
-          <span className="text-amber-300">You {myWins}</span>
+          <span className="text-amber-300">{meName} {myWins}</span>
           <span className="text-gray-500 mx-3">–</span>
           <span className="text-gray-200">{theirWins} {themName}</span>
         </div>
@@ -74,7 +77,7 @@ export default function RpsInput({ myColor, training, winsNeeded, current, resul
       {finished ? (
         <div className="flex flex-col items-center gap-4" role="status">
           <div className="flex items-center gap-8">
-            {handBox(me ? finished.hands[me] : null, 'You')}
+            {handBox(me ? finished.hands[me] : null, meName)}
             <span className="text-gray-500 font-black text-xl">vs</span>
             {handBox(finished.hands[them], themName)}
           </div>
@@ -103,7 +106,7 @@ export default function RpsInput({ myColor, training, winsNeeded, current, resul
               </button>
             ))}
           </div>
-          {myPick && <p className="text-gray-400 text-sm">Waiting for {training ? 'the computer' : 'your opponent'}…</p>}
+          {myPick && <p className="text-gray-400 text-sm">Waiting for {training ? 'the computer' : teamMode ? 'the other wizards' : 'your opponent'}…</p>}
         </>
       )}
     </div>
