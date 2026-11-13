@@ -1,20 +1,38 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  MODES, randomMode, buildChoices, maskSpell, revealRandomLetter, CHOICE_COUNT, scramblePuzzle, isSolved,
+  MODES, randomMode, buildChoices, maskSpell, CHOICE_COUNT, scramblePuzzle, isSolved,
   PUZZLE_IMAGES, randomPuzzleImage,
-  hangmanStart, hangmanNextLetter, matchWords, lettersFound, spellWordCount, fillWords,
+  matchWords, lettersFound, spellWordCount, fillWords, rpsThrowWinner, isRpsHand, randomRpsHand,
+  mathQuestion, MATH_FACTOR,
 } from './modes';
-import type { SpellData } from '@/types/game';
+import type { BattleMode, SpellData } from '@/types/game';
 
 const spell = (latin: string, english: string, description = `${english}.`): SpellData => ({ latin, english, description, category: 'Test' });
 const POOL = [spell('Lux', 'Light'), spell('Nox', 'Night'), spell('Ignis', 'Fire'), spell('Aqua', 'Water'), spell('Terra', 'Earth'), spell('Dup', 'Light')];
+
+test('randomMode plays every mode once per battle before repeating any', () => {
+  for (let run = 0; run < 50; run++) {
+    let used: BattleMode[] = [];
+    let previous: BattleMode | null = MODES[run % MODES.length]; // last mode of the previous battle
+    const cycle = (): BattleMode[] => MODES.map(() => {
+      const m = randomMode(used, previous);
+      assert.notEqual(m, previous);
+      if (used.length >= MODES.length) used = [];
+      used.push(m);
+      previous = m;
+      return m;
+    });
+    assert.equal(new Set(cycle()).size, MODES.length);
+    assert.equal(new Set(cycle()).size, MODES.length); // and again for the next cycle
+  }
+});
 
 test('randomMode never repeats the previous mode and can reach every other mode', () => {
   for (const prev of MODES) {
     const seen = new Set<string>();
     for (let i = 0; i < MODES.length - 1; i++) {
-      const m = randomMode(prev, () => i / (MODES.length - 1));
+      const m = randomMode([], prev, () => i / (MODES.length - 1));
       assert.notEqual(m, prev);
       seen.add(m);
     }
@@ -36,19 +54,6 @@ test('maskSpell hides letters and keeps spaces', () => {
   assert.equal(maskSpell('Lux in Tenebris'), '___ __ ________');
 });
 
-test('revealRandomLetter uncovers one hidden letter at a time until the spell is complete', () => {
-  const latin = 'Lux in Tenebris';
-  let masked = maskSpell(latin);
-  const letters = latin.replace(/ /g, '').length;
-  for (let step = 1; step <= letters; step++) {
-    const next = revealRandomLetter(latin, masked);
-    assert.equal([...next].filter((c, i) => c !== masked[i]).length, 1);
-    masked = next;
-  }
-  assert.equal(masked, latin);
-  assert.equal(revealRandomLetter(latin, masked), latin);
-});
-
 test('scramblePuzzle returns all 12 tiles once and never an already solved picture', () => {
   for (let i = 0; i < 200; i++) {
     const order = scramblePuzzle();
@@ -68,23 +73,6 @@ test('isSolved accepts only the complete, in-order picture', () => {
   assert.equal(isSolved(solved.slice(0, 11)), false);
 });
 
-test('hangman starts with first letters, then reveals last letters left to right, then random ones', () => {
-  const latin = 'Ignis Aeternus Devora';
-  let masked = hangmanStart(latin);
-  assert.equal(masked, 'I____ A_______ D_____');
-  masked = hangmanNextLetter(latin, masked);
-  assert.equal(masked, 'I___s A_______ D_____');
-  masked = hangmanNextLetter(latin, masked);
-  masked = hangmanNextLetter(latin, masked);
-  assert.equal(masked, 'I___s A______s D____a');
-  const before = masked;
-  masked = hangmanNextLetter(latin, masked); // now random: exactly one more letter
-  assert.equal([...masked].filter((c, i) => c !== before[i]).length, 1);
-  while (masked.includes('_')) masked = hangmanNextLetter(latin, masked);
-  assert.equal(masked, latin);
-  assert.equal(hangmanStart('A Lux'), 'A L__'); // one-letter words are fully shown
-});
-
 test('memorize: words count in any position, ignoring case, and add up letters', () => {
   const spell = 'abutres vao cair logo';
   // What the phone shows: the found words (as the server sends them) on top of the all-underscore mask.
@@ -101,10 +89,9 @@ test('memorize: words count in any position, ignoring case, and add up letters',
   assert.deepEqual(matchWords('Vita Tua Mea Vita', 'vita'), [0, 3]); // repeated words both found
 });
 
-test('fillWords puts a player\'s found words on top of the shared hangman letters', () => {
-  assert.equal(fillWords('I___s A______s D____a', { 2: 'Devora' }), 'I___s A______s Devora');
+test('fillWords puts a player\'s found words on top of the mask', () => {
   assert.equal(fillWords('_____ ___ ____ ____', { 0: 'abutres', 3: 'logo' }), 'abutres ___ ____ logo');
-  assert.equal(fillWords('I___s A______s'), 'I___s A______s');
+  assert.equal(fillWords('_____ ___'), '_____ ___');
 });
 
 test('randomPuzzleImage never repeats the previous picture and can reach every other one', () => {
@@ -119,4 +106,32 @@ test('randomPuzzleImage never repeats the previous picture and can reach every o
     assert.equal(seen.size, others);
   }
   assert.ok(PUZZLE_IMAGES.includes(randomPuzzleImage(null) as (typeof PUZZLE_IMAGES)[number]));
+});
+
+test('rpsThrowWinner: rock beats scissors beats paper beats rock; no pick loses; same hand ties', () => {
+  assert.equal(rpsThrowWinner('rock', 'scissors'), 'a');
+  assert.equal(rpsThrowWinner('scissors', 'paper'), 'a');
+  assert.equal(rpsThrowWinner('paper', 'rock'), 'a');
+  assert.equal(rpsThrowWinner('scissors', 'rock'), 'b');
+  assert.equal(rpsThrowWinner('rock', 'rock'), null);
+  assert.equal(rpsThrowWinner(null, 'paper'), 'b');
+  assert.equal(rpsThrowWinner('paper', null), 'a');
+  assert.equal(rpsThrowWinner(null, null), null);
+});
+
+test('isRpsHand accepts only the three hands; randomRpsHand returns one', () => {
+  assert.ok(isRpsHand('rock') && isRpsHand('paper') && isRpsHand('scissors'));
+  assert.ok(!isRpsHand('Rock') && !isRpsHand('') && !isRpsHand(undefined));
+  assert.ok(isRpsHand(randomRpsHand(() => 0.999)));
+});
+
+test('mathQuestion: factors in range, 4 different positive options including the product', () => {
+  for (let i = 0; i < 500; i++) {
+    const { a, b, options } = mathQuestion();
+    for (const f of [a, b]) assert.ok(f >= MATH_FACTOR.min && f <= MATH_FACTOR.max && Number.isInteger(f));
+    assert.equal(options.length, CHOICE_COUNT);
+    assert.equal(new Set(options).size, CHOICE_COUNT);
+    assert.ok(options.includes(a * b));
+    for (const o of options) assert.ok(o > 0);
+  }
 });

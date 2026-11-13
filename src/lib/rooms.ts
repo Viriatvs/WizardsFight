@@ -21,9 +21,12 @@ export function createRoom(hostSocketId: string): Room {
     mode: null,
     lockedOut: new Set(),
     roundResults: [],
+    modesUsed: [],
+    math: { questions: [], progress: new Map() },
     roundTimes: [],
     solo: false,
     puzzleImage: null,
+    rps: { throw: 0, open: false, picks: new Map(), wins: new Map(), idleThrows: 0 },
     foundWords: new Map(),
   };
   rooms.set(id, room);

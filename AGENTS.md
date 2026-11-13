@@ -69,9 +69,10 @@ src/
   lib/rooms.ts             In-memory room store: createRoom / getRoom / deleteRoom / sweepAbandonedRooms (+ rooms.test.ts)
   lib/spells.ts            Server-only: parses /spells.md at startup + randomSpell(excludeLatin)
   lib/scoring.ts           normalizeSpell, validateSubmission, determineWinner
-  lib/modes.ts             Battle modes: MODES, MODE_LABELS, randomMode, buildChoices, maskSpell, revealRandomLetter,
-                           PUZZLE, PUZZLE_IMAGES, randomPuzzleImage, scramblePuzzle, isSolved, hangmanStart, hangmanNextLetter,
-                           matchWords, fillWords, lettersFound, spellWordCount (pure, shared)
+  lib/modes.ts             Battle modes: MODES, MODE_LABELS, randomMode, buildChoices, maskSpell,
+                           PUZZLE, PUZZLE_IMAGES, randomPuzzleImage, scramblePuzzle, isSolved,
+                           matchWords, fillWords, lettersFound, spellWordCount, RPS_HANDS, isRpsHand,
+                           randomRpsHand, rpsThrowWinner, MATH_FACTOR, MATH_TRAINING_TARGET, mathQuestion (pure, shared)
   lib/modes.test.ts        Unit tests for modes.ts
   app/layout.tsx           Root layout (dark background)
   app/page.tsx             Landing page: "Start Fight" creates a room, then goes to /battle/:id
@@ -82,7 +83,7 @@ src/
                            VictoryAnimation (host overlay: player's name as headline over the GIF),
                            SpellInput (typing modes: full spell / letter slots / memorize phase), ChoiceInput (4 options),
                            ScoreTable (Blue vs Red: won/lost/draws + per-round chips),
-                           PhoneResult (phone screen after a round or game; training variant), PuzzleInput (puzzle board),
+                           PhoneResult (phone screen after a round or game; training variant), PuzzleInput (puzzle board), RpsInput + RpsIcon (Rock Paper Scissors picks, pixel-art hands), MathInput (Math Is Magic),
                            TrainingSummary (played/solved/failed/best + per-round chips), CopyLinkButton
 public/images/             Battlefield scenes (empty / blue ready / red ready / both) + victory GIFs per color
                            + puzzle pictures (600x800, 3:4) listed in `PUZZLE_IMAGES` (modes.ts): puzzle-red-wizard.webp
@@ -136,7 +137,7 @@ Phone phases (`GamePhase`): `connecting → name → waiting → countdown → s
 - When 2 players are present and both are ready, the server waits **2 s** and calls `startBattle()`.
 - `startBattle`:
   - Sets `round++` and state `countdown`.
-  - Picks a random **mode** (`randomMode`, never the same as the previous round) and a random spell (never the same as the previous one), then emits `room:update`, which now includes `mode`. Both screens show the mode name on the countdown.
+  - Picks a random **mode** (`randomMode`: a mode not yet played in this battle, tracked in `room.modesUsed` and cleared by `newGame`; once all were played a new cycle starts; never the same as the previous round) and a random spell (never the same as the previous one), then emits `room:update`, which now includes `mode`. Both screens show the mode name on the countdown.
   - Every 1 s it emits `countdown {seconds: 3}`, then `2`, then `1`, then `fight`.
   - One second after `fight`, it sets state `playing` and `spellRevealedAt = Date.now()`, emits `room:update`, and calls `revealSpell()`. That sends the mode-specific `spell:reveal` and starts the mode's timers.
 
@@ -148,9 +149,10 @@ Time is always measured on the server: `durationMs = serverNow - spellRevealedAt
 | `type` | Speed Cast | `{spell, revealedAt}` | `SpellInput`: Latin, English, description | Type it; unlimited retries | Both correct → fastest wins. One correct → `grace {seconds:3}`, then they win (`graceTimeout`). Draw after 30 s (`timedOut`). |
 | `translate` | Translate | `{latin, category, options[4], revealedAt, limitMs}` | `ChoiceInput`: Latin + 4 English translations | **One pick.** A wrong pick puts you in `lockedOut` for the round. | First correct pick wins. All players wrong → draw (`allWrong`). Draw after 15 s (`timedOut`). |
 | `describe` | Describe | Same as translate | `ChoiceInput`: Latin + 4 descriptions | Same as translate | Same as translate |
-| `hangman` | Hangman | `{masked, english, category, revealedAt}`. `masked` starts with every word's first letter visible (`hangmanStart`). | `SpellInput` with letter slots + English hint + "N of M words found". The shared letters with the player's own found words filled in (`fillWords`). | Like Memorize: type any words, any number of times; each correct word fills in **for that player only** (`spell:progress`); a guess with no new word → `spell:submitted {correct:false}`. | Every 1 s the server sends `spell:hint {masked}` with one more letter (`hangmanNextLetter`): first each word's last letter, left to right, then random letters. Both players see the same letters. With the last letter it adds `limitMs: 40000`. First to find every word wins. Draw 40 s after the last letter (`timedOut`, `HANGMAN_AFTER_FULL_MS`). No letters tie-break. |
 | `puzzle` | Puzzle | `{image, cols:3, rows:4, order[12], revealedAt, limitMs}` (same picture and scramble for both, never pre-solved; the picture is random from `PUZZLE_IMAGES`, never the room's previous one: `randomPuzzleImage`, `room.puzzleImage`) | `PuzzleInput`: 12 tile buttons, each showing its part of the picture via CSS `background-position`. Tap two tiles to swap; no preview. | When the picture is complete the phone sends its order as `"0,1,…,11"`; the server checks `isSolved` (unsolved arrangements are ignored). | First solved wins. Draw after 60 s (`PUZZLE_LIMIT_MS`, `timedOut`). |
 | `memorize` | Memorize | `{latin, masked, english, category, revealedAt, memorizeMs}` | Latin + "MEMORIZE IT" for 5 s (no input), then `spell:hide {limitMs: 30000}` → dashes + English hint + "N of M words found" + input | Type any words, any number of times. Each correct word (`matchWords`: any position, case-insensitive, repeats all found) is stored in `room.foundWords` and revealed **for that player only** via `spell:progress {words, found, total}`. A guess with no new word → `spell:submitted {correct:false}`. Submits during the 5 s phase are ignored. | First to find every word wins. At 30 s (`MEMORIZE_LIMIT_MS`): more correct letters (`lettersFound`) wins (`onLetters`, `results[].letters`); equal letters (incl. 0–0) is a draw (`timedOut`). |
+| `rps` | Rock Paper Scissors | `{winsNeeded: 2, revealedAt}`, then per throw `rps:throw {throw, limitMs: 3000}` and `rps:result` | `RpsInput`: score, a 3 s timer and three pixel-art buttons (`RpsIcon`, no text; `aria-label`s name them). After a throw both hands + who won it, for 2 s (`RPS_SHOW_MS`). | Phone sends `rock`/`paper`/`scissors` as `spell:submit` text; one pick per throw (`room.rps`); the throw resolves when every player picked or after 3 s (`RPS_PICK_MS`). No pick loses to any pick (`rpsThrowWinner`); same hands or both missing → tie, throw again. Training: a random computer hand (`'cpu'`). | First to win 2 throws (`RPS_WINS_NEEDED`) wins; time = until that throw's result ended. Computer wins in training → failed round. 3 throws in a row with no picks at all → draw (`timedOut`, `RPS_MAX_IDLE_THROWS`). |
+| `math` | Math Is Magic | `{question: {a, b, options[4]}, revealedAt, limitMs: 10000}` (never the product itself) | `MathInput`: "a × b", 4 number buttons, right-answer count, timer, Right!/Wrong after each pick | Phone sends `"<question index>:<number>"`. Every pick (right or wrong) moves that player on: `math:next {question, right, lastCorrect}` to that player only. Both players get the same questions in the same order (`room.math.questions`, grown with `mathQuestion` as needed); a stale index (double tap) is ignored. Factors come from `MATH_FACTOR` (2–9); wrong options are near misses (a neighbouring times-table result, or the product ±1/±10). | At 10 s (`MATH_LIMIT_MS`): more right answers wins (`results[].rightAnswers`, `winDetail`); equal is a draw (`timedOut`). Training: passed with `MATH_TRAINING_TARGET` (5) right. Winner's time is recorded as 10 s. |
 
 - Options in Translate/Describe: `buildChoices` takes the correct answer plus 3 different answers from other spells and shuffles them. The server checks the chosen text exactly against `spell.english` / `spell.description`.
 - Typed answers: `validateSubmission` lowercases, trims and collapses whitespace on both sides, then compares exactly.
@@ -217,9 +219,11 @@ Payload (`BattleEnd` type): `{winnerColor, winnerName, durationMs, results: {[so
 | `countdown` | server → room | `{seconds}` |
 | `fight` | server → room | `{text:'FIGHT'}` |
 | `spell:reveal` | server → room | `SpellReveal` (per mode, see §5) |
-| `spell:hint` | server → room | `{masked, limitMs?}` (hangman) |
 | `spell:hide` | server → room | `{limitMs}` (memorize) |
-| `spell:progress` | server → one player | `{words: {[index]: word}, found, total}` (memorize & hangman: that player's correctly typed words; the phone fills them in with `fillWords`) |
+| `spell:progress` | server → one player | `{words: {[index]: word}, found, total}` (memorize: that player's correctly typed words; the phone fills them in with `fillWords`) |
+| `rps:throw` | server → room | `RpsThrow {throw, limitMs}` (rps: a new throw opens) |
+| `rps:result` | server → room | `RpsResult {throw, hands, winner, wins}` keyed by color or `'cpu'` (rps: a throw ended) |
+| `math:next` | server → one player | `MathNext {question, right, lastCorrect}` (math: next question after a pick) |
 | `spell:submitted` | server → one player | `{correct, durationMs, lockedOut?}` |
 | `grace` | server → room | `{seconds: 3}` |
 | `battle:end` | server → room | see §6 |
@@ -231,7 +235,7 @@ If you add or change an event, update both the server handler in `server.ts` and
 ## Conventions
 
 - **Spells** live in `/spells.md`, not in code. `src/lib/spells.ts` reads that file once when the server starts, so changes need a restart or deploy. The Latin may contain only letters and spaces, because players type it exactly. If a row is invalid, the server refuses to start and names the line. `spells.ts` uses `fs`, so never import it from client components.
-- **Timing constants:** the mode timings are named constants at the top of `server.ts` (`TYPE_LIMIT_MS`, `GRACE_MS`, `CHOICE_LIMIT_MS`, `HANGMAN_*`, `MEMORIZE_*`, `PUZZLE_LIMIT_MS`, `ROOM_ABANDONED_MS`, `ROOM_SWEEP_INTERVAL_MS`). The 2 s pre-battle delay is still written inline.
+- **Timing constants:** the mode timings are named constants at the top of `server.ts` (`TYPE_LIMIT_MS`, `GRACE_MS`, `CHOICE_LIMIT_MS`, `MEMORIZE_*`, `PUZZLE_LIMIT_MS`, `RPS_*`, `MATH_LIMIT_MS`, `ROOM_ABANDONED_MS`, `ROOM_SWEEP_INTERVAL_MS`). The 2 s pre-battle delay is still written inline.
 - **Adding a mode:** add it to `BattleMode` and `SpellReveal` (types), `MODES`/`MODE_LABELS` (modes.ts), a `case` in `revealSpell()` and the answer rules in the `spell:submit` handler (server.ts), and the phone UI in `play/[room]/page.tsx`. If its draw needs its own wording, add it to `drawReason()` (game.ts). Then document it in §5.
 - **Visual design:** pixel-art dark medieval. **Read `docs/design.md` before any UI work.**
   - Use `btn-pixel` / `btn-pixel-secondary` for buttons, `panel-stone` for cards and panels, and `input-pixel` for inputs. Don't style new buttons with ad-hoc colors.

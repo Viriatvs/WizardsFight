@@ -1,4 +1,5 @@
 // Game rules: a game is a series of rounds. Pure and shared by server and client.
+import { MATH_TRAINING_TARGET } from './modes';
 import type { PlayerColor, RoundResults, GameScore, BattleEnd } from '@/types/game';
 
 export type { RoundResults, GameScore };
@@ -56,11 +57,15 @@ export function drawReason(end: Pick<BattleEnd, 'allWrong' | 'mode' | 'results'>
   if (end.game?.training) {
     if (end.allWrong) return 'Wrong answer';
     if (end.mode === 'puzzle') return 'Puzzle not finished in time';
-    if (end.mode === 'memorize' || end.mode === 'hangman') return 'Spell not completed in time';
+    if (end.mode === 'memorize') return 'Spell not completed in time';
+    if (end.mode === 'rps') return 'The computer wizard won';
+    if (end.mode === 'math') return `Fewer than ${MATH_TRAINING_TARGET} right answers`;
     return 'Time ran out';
   }
   if (end.allWrong) return 'Both wizards chose wrong';
   if (end.mode === 'puzzle') return 'Nobody finished the puzzle in time';
+  if (end.mode === 'rps') return 'Nobody picked in time';
+  if (end.mode === 'math') return `Same number of right answers (${Object.values(end.results)[0]?.rightAnswers ?? 0})`;
   if (end.mode === 'memorize') {
     const letters = Object.values(end.results).map((r) => r.letters ?? 0);
     return letters.some((l) => l > 0) ? `Same number of correct letters (${letters[0]})` : 'Nobody remembered a word';
@@ -69,9 +74,15 @@ export function drawReason(end: Pick<BattleEnd, 'allWrong' | 'mode' | 'results'>
 }
 
 /** Extra line for a win that wasn't a completed answer, e.g. "Won on letters: 12 vs 9". */
-export function winDetail(end: Pick<BattleEnd, 'onLetters' | 'winnerColor' | 'results'>): string | null {
-  if (!end.onLetters || !end.winnerColor) return null;
+export function winDetail(end: Pick<BattleEnd, 'onLetters' | 'winnerColor' | 'results'> & { mode?: BattleEnd['mode'] }): string | null {
+  if (!end.winnerColor) return null;
   const results = Object.values(end.results);
+  if (end.mode === 'math') {
+    const mine = results.find((r) => r.color === end.winnerColor)?.rightAnswers ?? 0;
+    const theirs = results.find((r) => r.color !== end.winnerColor);
+    return theirs ? `Right answers: ${mine} vs ${theirs.rightAnswers ?? 0}` : `${mine} right answers`;
+  }
+  if (!end.onLetters) return null;
   const mine = results.find((r) => r.color === end.winnerColor)?.letters ?? 0;
   const theirs = results.find((r) => r.color !== end.winnerColor)?.letters ?? 0;
   return `Won on letters: ${mine} vs ${theirs}`;

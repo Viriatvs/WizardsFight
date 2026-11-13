@@ -2,14 +2,16 @@ import http from 'http';
 import next from 'next';
 import { Server, Socket } from 'socket.io';
 import { createRoom, getRoom, deleteRoom, sweepAbandonedRooms } from './src/lib/rooms';
+import { saveFight } from './src/lib/fightStore';
 import { randomSpell, SPELLS } from './src/lib/spells';
 import { validateSubmission, determineWinner } from './src/lib/scoring';
 import {
-  randomMode, buildChoices, maskSpell, scramblePuzzle, isSolved, PUZZLE, randomPuzzleImage,
-  hangmanStart, hangmanNextLetter, matchWords, lettersFound, spellWordCount,
+  MODES, randomMode, buildChoices, maskSpell, scramblePuzzle, isSolved, PUZZLE, randomPuzzleImage,
+  matchWords, lettersFound, spellWordCount, isRpsHand, randomRpsHand, rpsThrowWinner,
+  mathQuestion, MATH_TRAINING_TARGET,
 } from './src/lib/modes';
 import { gameScore, gameWinner, isGameOver } from './src/lib/game';
-import type { Room, Player, PlayerColor, Submission, SpellReveal, GameInfo, BattleEnd } from './src/types/game';
+import type { Room, Player, PlayerColor, Submission, SpellReveal, GameInfo, BattleEnd, RpsHand, RpsResult, RpsSide, MathNext } from './src/types/game';
 
 const dev = process.env.NODE_ENV !== 'production';
 const port = parseInt(process.env.PORT || '3000', 10);
@@ -18,11 +20,17 @@ const COUNTDOWN_STEP_MS = 1000;
 const TYPE_LIMIT_MS = 30000;
 const GRACE_MS = 3000;
 const CHOICE_LIMIT_MS = 15000;
-const HANGMAN_STEP_MS = 1000;
-const HANGMAN_AFTER_FULL_MS = 40000;
 const MEMORIZE_SHOW_MS = 5000;
 const MEMORIZE_LIMIT_MS = 30000;
 const PUZZLE_LIMIT_MS = 60000;
+const RPS_PICK_MS = 3000;
+/** How long both hands stay on screen before the next throw (or the round result). */
+const RPS_SHOW_MS = 2000;
+const RPS_WINS_NEEDED = 2;
+/** Throws in a row where nobody picked before the round is a draw. */
+const RPS_MAX_IDLE_THROWS = 3;
+const CPU = 'cpu';
+const MATH_LIMIT_MS = 10000;
 const ROOM_ABANDONED_MS = 5 * 60 * 1000;
 const ROOM_SWEEP_INTERVAL_MS = 60 * 1000;
 
@@ -47,6 +55,7 @@ function gameInfo(room: Room): GameInfo {
 function newGame(room: Room) {
   room.roundResults = [];
   room.roundTimes = [];
+  room.modesUsed = [];
 }
 
 function roomToPayload(room: Room) {
@@ -92,6 +101,7 @@ function endBattle(io: Server, room: Room, winner: Player | null, extra: Record<
     const sub = room.submissions.get(p.socketId);
     results[p.socketId] = { color: p.color, name: p.name, durationMs: sub?.durationMs ?? -1, correct: !!sub || p === winner };
     if (room.mode === 'memorize') results[p.socketId].letters = lettersFound(room.spell.latin, room.foundWords.get(p.socketId) ?? []);
+    if (room.mode === 'math') results[p.socketId].rightAnswers = room.math.progress.get(p.socketId)?.right ?? 0;
   }
   const payload: BattleEnd = {
     winnerColor: winner?.color ?? null,
@@ -104,6 +114,27 @@ function endBattle(io: Server, room: Room, winner: Player | null, extra: Record<
   };
   io.to(room.id).emit('battle:end', payload);
   console.log(`[room ${room.id}] round ${payload.game.round} (${room.mode}) winner: ${winner?.color ?? 'none'}, game winner: ${payload.game.winner ?? '-'} ${JSON.stringify(extra)}`);
+  recordFinishedGame(room, payload);
+}
+
+/** Fight History: a finished versus game (not training, not cancelled) is saved to data/fights.json. */
+function recordFinishedGame(room: Room, end: BattleEnd) {
+  const { game } = end;
+  if (room.solo || !game.over || !game.winner) return;
+  const players = Object.values(end.results);
+  const winner = players.find((p) => p.color === game.winner);
+  const loser = players.find((p) => p.color !== game.winner);
+  if (!winner || !loser) return;
+  const loserColor = loser.color;
+  saveFight({
+    id: `${room.id}-${Date.now()}`,
+    at: new Date().toISOString(),
+    winner: { name: winner.name, color: winner.color },
+    loser: { name: loser.name, color: loserColor },
+    score: { winner: game.score[winner.color], loser: game.score[loserColor] },
+    draws: game.score.draws,
+    rounds: game.results.length,
+  });
 }
 
 /**
@@ -155,6 +186,67 @@ function drawAfter(io: Server, room: Room, ms: number) {
   laterInRound(room, ms, () => endBattle(io, room, null, { timedOut: true }));
 }
 
+/** Modes decided by the server (not by a correct answer): stores the winner's time, as a submission would. */
+function recordWinTime(room: Room, player: Player, durationMs: number) {
+  room.submissions.set(player.socketId, { socketId: player.socketId, text: '', submittedAt: Date.now(), spellRevealedAt: room.spellRevealedAt!, durationMs, correct: true, valid: true });
+}
+
+/** MathIsMagic time limit: more right answers wins; equal is a draw. Training passes with MATH_TRAINING_TARGET right. */
+function endMathOnAnswers(io: Server, room: Room) {
+  const [best, second] = Array.from(room.players.values())
+    .map((p) => ({ p, right: room.math.progress.get(p.socketId)?.right ?? 0 }))
+    .sort((a, b) => b.right - a.right);
+  const won = best && (room.solo ? best.right >= MATH_TRAINING_TARGET : best.right > (second?.right ?? 0));
+  if (!won) return endBattle(io, room, null, { timedOut: true });
+  recordWinTime(room, best.p, MATH_LIMIT_MS);
+  endBattle(io, room, best.p);
+}
+
+function startRpsThrow(io: Server, room: Room) {
+  const rps = room.rps;
+  rps.throw++;
+  rps.picks.clear();
+  rps.open = true;
+  io.to(room.id).emit('rps:throw', { throw: rps.throw, limitMs: RPS_PICK_MS });
+  const n = rps.throw;
+  laterInRound(room, RPS_PICK_MS, () => { if (rps.throw === n) resolveRpsThrow(io, room); });
+}
+
+/** Ends the current throw (both picked, or time is up): shows both hands, then the next throw or the round result. */
+function resolveRpsThrow(io: Server, room: Room) {
+  const rps = room.rps;
+  if (!rps.open) return;
+  rps.open = false;
+  // Two sides: both players, or the one player against the computer wizard.
+  const sides: Array<{ id: string; side: RpsSide; hand: RpsHand | null }> = Array.from(room.players.values())
+    .map((p) => ({ id: p.socketId, side: p.color, hand: rps.picks.get(p.socketId) ?? null }));
+  if (room.solo) sides.push({ id: CPU, side: CPU, hand: randomRpsHand() });
+  const [a, b] = sides;
+  const w = rpsThrowWinner(a.hand, b.hand);
+  const winner = w === 'a' ? a : w === 'b' ? b : null;
+  if (winner) rps.wins.set(winner.id, (rps.wins.get(winner.id) ?? 0) + 1);
+  rps.idleThrows = !a.hand && !b.hand ? rps.idleThrows + 1 : 0;
+
+  const result: RpsResult = {
+    throw: rps.throw,
+    hands: Object.fromEntries(sides.map((s) => [s.side, s.hand])),
+    winner: winner?.side ?? null,
+    wins: Object.fromEntries(sides.map((s) => [s.side, rps.wins.get(s.id) ?? 0])),
+  };
+  io.to(room.id).emit('rps:result', result);
+
+  const roundWinner = winner && (rps.wins.get(winner.id) ?? 0) >= RPS_WINS_NEEDED ? winner : null;
+  laterInRound(room, RPS_SHOW_MS, () => {
+    if (roundWinner) {
+      const player = room.players.get(roundWinner.id) ?? null; // null: the computer wizard won (training)
+      if (player) recordWinTime(room, player, Date.now() - room.spellRevealedAt!);
+      return endBattle(io, room, player);
+    }
+    if (rps.idleThrows >= RPS_MAX_IDLE_THROWS) return endBattle(io, room, null, { timedOut: true });
+    startRpsThrow(io, room);
+  });
+}
+
 function revealSpell(io: Server, room: Room) {
   const spell = room.spell;
   const revealedAt = room.spellRevealedAt!;
@@ -169,23 +261,6 @@ function revealSpell(io: Server, room: Room) {
       drawAfter(io, room, CHOICE_LIMIT_MS);
       return;
     }
-    case 'hangman': {
-      // Starts with each word's first letter; then last letters, then random ones (hangmanNextLetter).
-      let masked = hangmanStart(latin);
-      emit({ mode: 'hangman', masked, english, category, revealedAt });
-      const round = room.round;
-      const tick = setInterval(() => {
-        if (room.round !== round || room.state !== 'playing') return clearInterval(tick);
-        masked = hangmanNextLetter(latin, masked);
-        const full = !masked.includes('_');
-        io.to(room.id).emit('spell:hint', full ? { masked, limitMs: HANGMAN_AFTER_FULL_MS } : { masked });
-        if (full) {
-          clearInterval(tick);
-          drawAfter(io, room, HANGMAN_AFTER_FULL_MS);
-        }
-      }, HANGMAN_STEP_MS);
-      return;
-    }
     case 'memorize': {
       emit({ mode: 'memorize', latin, masked: maskSpell(latin), english, category, revealedAt, memorizeMs: MEMORIZE_SHOW_MS });
       laterInRound(room, MEMORIZE_SHOW_MS, () => io.to(room.id).emit('spell:hide', { limitMs: MEMORIZE_LIMIT_MS }));
@@ -196,6 +271,19 @@ function revealSpell(io: Server, room: Room) {
       room.puzzleImage = randomPuzzleImage(room.puzzleImage);
       emit({ mode: 'puzzle', image: room.puzzleImage, ...PUZZLE, order: scramblePuzzle(), revealedAt, limitMs: PUZZLE_LIMIT_MS });
       drawAfter(io, room, PUZZLE_LIMIT_MS);
+      return;
+    }
+    case 'math': {
+      const question = mathQuestion();
+      room.math = { questions: [question], progress: new Map() };
+      emit({ mode: 'math', question, revealedAt, limitMs: MATH_LIMIT_MS });
+      laterInRound(room, MATH_LIMIT_MS, () => endMathOnAnswers(io, room));
+      return;
+    }
+    case 'rps': {
+      room.rps = { throw: 0, open: false, picks: new Map(), wins: new Map(), idleThrows: 0 };
+      emit({ mode: 'rps', winsNeeded: RPS_WINS_NEEDED, revealedAt });
+      startRpsThrow(io, room);
       return;
     }
     default:
@@ -210,7 +298,10 @@ function startBattle(io: Server, room: Room) {
   room.round++;
   room.state = 'countdown';
   room.startedAt = Date.now();
-  room.mode = randomMode(room.mode);
+  room.mode = randomMode(room.modesUsed, room.mode);
+  // Every mode has been played: start a new cycle with this one.
+  if (room.modesUsed.length >= MODES.length) room.modesUsed = [];
+  room.modesUsed.push(room.mode);
   room.spell = randomSpell(room.spell.latin || undefined);
   io.to(room.id).emit('room:update', roomToPayload(room));
 
@@ -406,13 +497,39 @@ app.prepare().then(() => {
       const player = room.players.get(socket.id);
       if (!player || room.submissions.has(socket.id) || room.lockedOut.has(socket.id)) return;
 
+      // MathIsMagic: text is "<question index>:<picked number>". Every pick moves this player to the next question.
+      if (room.mode === 'math') {
+        const { questions, progress } = room.math;
+        const me = progress.get(socket.id) ?? { index: 0, right: 0 };
+        const [index, picked] = String(payload.text).split(':').map(Number);
+        if (index !== me.index) return; // a double tap on a question already answered
+        const q = questions[me.index];
+        const lastCorrect = picked === q.a * q.b;
+        if (lastCorrect) me.right++;
+        me.index++;
+        progress.set(socket.id, me);
+        // Both players get the same questions in the same order; whoever gets further first adds the next one.
+        if (!questions[me.index]) questions.push(mathQuestion());
+        const next: MathNext = { question: questions[me.index], right: me.right, lastCorrect };
+        io.to(socket.id).emit('math:next', next);
+        return;
+      }
+
+      // Rock Paper Scissors: one pick per throw; the throw resolves once every player picked.
+      if (room.mode === 'rps') {
+        if (!room.rps.open || room.rps.picks.has(socket.id) || !isRpsHand(payload.text)) return;
+        room.rps.picks.set(socket.id, payload.text);
+        if (room.rps.picks.size >= room.players.size) resolveRpsThrow(io, room);
+        return;
+      }
+
       const submittedAt = Date.now();
       const durationMs = submittedAt - room.spellRevealedAt;
       // Memorize: the spell is still on screen, so typing it now doesn't count.
       if (room.mode === 'memorize' && durationMs < MEMORIZE_SHOW_MS) return;
 
-      // Memorize & Hangman: correct words are filled in for this player only; they win once every word is found.
-      const byWords = room.mode === 'memorize' || room.mode === 'hangman';
+      // Memorize: correct words are filled in for this player only; they win once every word is found.
+      const byWords = room.mode === 'memorize';
       if (byWords) {
         const latin = room.spell.latin;
         const before = room.foundWords.get(socket.id) ?? [];

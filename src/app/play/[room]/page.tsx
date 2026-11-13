@@ -8,17 +8,19 @@ import SpellInput from '@/components/SpellInput';
 import ChoiceInput from '@/components/ChoiceInput';
 import PhoneResult from '@/components/PhoneResult';
 import PuzzleInput from '@/components/PuzzleInput';
+import RpsInput from '@/components/RpsInput';
+import MathInput from '@/components/MathInput';
 import { MODE_LABELS, fillWords } from '@/lib/modes';
 import { roundLabel } from '@/lib/game';
-import type { PlayerColor, GamePhase, BattleMode, SpellReveal, GameInfo, BattleEnd } from '@/types/game';
+import type { PlayerColor, GamePhase, BattleMode, SpellReveal, GameInfo, BattleEnd, RpsThrow, RpsResult, MathQuestion, MathNext } from '@/types/game';
 
 /** Where to send visitors of a room that no longer exists. The start page shows a notice for it. */
 const ROOM_EXPIRED_URL = '/?expired=1';
 
-/** Memorize/Hangman: this player's correctly typed words (index → word), from spell:progress. */
+/** Memorize: this player's correctly typed words (index → word), from spell:progress. */
 interface WordProgress { words: Record<number, string>; found: number; total: number }
 
-/** Shared by Memorize and Hangman: the player's words filled into `masked`, plus the word count. */
+/** Memorize: the player's words filled into `masked`, plus the word count. */
 function wordDisplay(category: string, masked: string, english: string, progress: WordProgress | null, hint: string) {
   const total = progress?.total ?? masked.split(' ').length;
   return {
@@ -36,8 +38,6 @@ function typingDisplay(reveal: SpellReveal, memorizeHidden: boolean, progress: W
   switch (reveal.mode) {
     case 'type':
       return { category: reveal.spell.category, text: reveal.spell.latin, english: reveal.spell.english, description: reveal.spell.description };
-    case 'hangman':
-      return wordDisplay(reveal.category, reveal.masked, reveal.english, progress, 'Type any words you can guess.');
     case 'memorize':
       if (!memorizeHidden) {
         return { category: reveal.category, text: reveal.latin, english: reveal.english, notice: 'Memorize it', inputVisible: false };
@@ -77,6 +77,9 @@ export default function PlayPage({ params }: { params: Promise<{ room: string }>
   const [deadline, setDeadline] = useState<number | null>(null);
   const [memorizeHidden, setMemorizeHidden] = useState(false);
   const [wordProgress, setWordProgress] = useState<WordProgress | null>(null);
+  const [rpsThrow, setRpsThrow] = useState<{ throw: number; deadline: number } | null>(null);
+  const [rpsResult, setRpsResult] = useState<RpsResult | null>(null);
+  const [math, setMath] = useState<{ question: MathQuestion; index: number; right: number; lastCorrect: boolean | null } | null>(null);
   const [submitted, setSubmitted] = useState<{ correct: boolean; durationMs: number } | null>(null);
   const [graceSeconds, setGraceSeconds] = useState<number | null>(null);
   const graceTimerRef = useRef<ReturnType<typeof setInterval>>();
@@ -110,6 +113,9 @@ export default function PlayPage({ params }: { params: Promise<{ room: string }>
         setDeadline(null);
         setMemorizeHidden(false);
         setWordProgress(null);
+        setRpsThrow(null);
+        setRpsResult(null);
+        setMath(null);
         setGraceSeconds(null);
         setBattleEnd(null);
       }
@@ -140,14 +146,11 @@ export default function PlayPage({ params }: { params: Promise<{ room: string }>
       setReveal(data);
       setMemorizeHidden(false);
       setWordProgress(null);
+      setRpsThrow(null);
+      setRpsResult(null);
+      setMath(data.mode === 'math' ? { question: data.question, index: 0, right: 0, lastCorrect: null } : null);
       setDeadline('limitMs' in data ? Date.now() + data.limitMs : null);
       setPhase('spell');
-    });
-
-    // Hangman: one more letter uncovered. limitMs arrives with the last letter.
-    socket.on('spell:hint', (data: { masked: string; limitMs?: number }) => {
-      setReveal((r) => (r?.mode === 'hangman' ? { ...r, masked: data.masked } : r));
-      if (data.limitMs) setDeadline(Date.now() + data.limitMs);
     });
 
     // Memorize: the spell disappears, typing starts.
@@ -156,7 +159,16 @@ export default function PlayPage({ params }: { params: Promise<{ room: string }>
       setDeadline(Date.now() + data.limitMs);
     });
 
-    // Memorize/Hangman: some typed words were right; only this player sees them.
+    // Rock Paper Scissors: a new throw opens, then both hands are shown.
+    socket.on('rps:throw', (data: RpsThrow) => setRpsThrow({ throw: data.throw, deadline: Date.now() + data.limitMs }));
+    socket.on('rps:result', (data: RpsResult) => setRpsResult(data));
+
+    // MathIsMagic: this player's next question after each pick.
+    socket.on('math:next', (data: MathNext) => {
+      setMath((m) => m && { question: data.question, index: m.index + 1, right: data.right, lastCorrect: data.lastCorrect });
+    });
+
+    // Memorize: some typed words were right; only this player sees them.
     socket.on('spell:progress', (data: WordProgress) => setWordProgress(data));
 
     socket.on('spell:submitted', (data: { correct: boolean; durationMs: number; lockedOut?: boolean }) => {
@@ -390,6 +402,25 @@ export default function PlayPage({ params }: { params: Promise<{ room: string }>
             onSolved={submitSpell}
             result={submitted}
             deadline={deadline}
+          />
+        )}
+
+        {phase === 'spell' && reveal?.mode === 'math' && math && (
+          <MathInput
+            {...math}
+            deadline={deadline}
+            onPick={(index, option) => submitSpell(`${index}:${option}`)}
+          />
+        )}
+
+        {phase === 'spell' && reveal?.mode === 'rps' && (
+          <RpsInput
+            myColor={color}
+            training={!!game?.training}
+            winsNeeded={reveal.winsNeeded}
+            current={rpsThrow}
+            result={rpsResult}
+            onPick={submitSpell}
           />
         )}
 

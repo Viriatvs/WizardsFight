@@ -188,7 +188,7 @@ export default function BattlePage({ params }: { params: Promise<{ room: string 
           winnerName={battleEnd.game.winner ? namesFrom(battleEnd.results)[battleEnd.game.winner] ?? null : battleEnd.winnerName}
           title={endTitle(battleEnd)}
           subtitle={endSubtitle(battleEnd)}
-          durationMs={battleEnd.game.winner ? null : battleEnd.durationMs}
+          durationMs={battleEnd.game.winner || battleEnd.mode === 'math' ? null : battleEnd.durationMs}
           drawReason={drawReason(battleEnd)}
           drawLabel={battleEnd.game.training ? 'FAILED' : 'DRAW'}
         />
@@ -203,7 +203,9 @@ export default function BattlePage({ params }: { params: Promise<{ room: string 
             </h2>
             <p className="text-gray-300 text-xl mb-8">
               {Object.values(battleEnd.results)[0]?.name}{' '}
-              {battleEnd.winnerColor && battleEnd.durationMs !== null
+              {battleEnd.winnerColor && winDetail(battleEnd)
+                ? `solved it — ${winDetail(battleEnd)}`
+                : battleEnd.winnerColor && battleEnd.durationMs !== null
                 ? `solved it in ${formatSeconds(battleEnd.durationMs)}`
                 : `failed — ${drawReason(battleEnd).toLowerCase()}`}
             </p>

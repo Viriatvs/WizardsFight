@@ -1,15 +1,16 @@
 // Pure helpers for battle modes. Shared by server and client: no Node or browser APIs here.
-import type { BattleMode, SpellData } from '@/types/game';
+import type { BattleMode, MathQuestion, RpsHand, SpellData } from '@/types/game';
 
-export const MODES: BattleMode[] = ['type', 'translate', 'describe', 'hangman', 'memorize', 'puzzle'];
+export const MODES: BattleMode[] = ['type', 'translate', 'describe', 'memorize', 'puzzle', 'rps', 'math'];
 
 export const MODE_LABELS: Record<BattleMode, string> = {
   type: 'Speed Cast',
   translate: 'Translate',
   describe: 'Describe',
-  hangman: 'Hangman',
   memorize: 'Memorize',
   puzzle: 'Puzzle',
+  rps: 'Rock Paper Scissors',
+  math: 'Math Is Magic',
 };
 
 /** Puzzle mode: a 3 x 4 = 12-tile grid. */
@@ -34,9 +35,13 @@ export const CHOICE_COUNT = 4;
 
 type Rand = () => number;
 
-/** Random mode, never the same as the previous round's. */
-export function randomMode(previous: BattleMode | null, rand: Rand = Math.random): BattleMode {
-  const available = MODES.filter((m) => m !== previous);
+/**
+ * Random mode not yet `used` in this battle. Once every mode was used, any mode may come again.
+ * Never the same as the previous round's.
+ */
+export function randomMode(used: BattleMode[], previous: BattleMode | null, rand: Rand = Math.random): BattleMode {
+  const fresh = MODES.filter((m) => !used.includes(m) && m !== previous);
+  const available = fresh.length ? fresh : MODES.filter((m) => m !== previous);
   return available[Math.floor(rand() * available.length)];
 }
 
@@ -76,20 +81,6 @@ export function maskSpell(latin: string): string {
   return latin.replace(/\S/g, '_');
 }
 
-/** Hangman start: every word's first letter visible, the rest hidden. */
-export function hangmanStart(latin: string): string {
-  return latin.replace(/\S+/g, (word) => word[0] + '_'.repeat(word.length - 1));
-}
-
-/** Hangman step: the leftmost word whose last letter is still hidden gets it; once all are shown, a random letter. */
-export function hangmanNextLetter(latin: string, masked: string, rand: Rand = Math.random): string {
-  for (const m of latin.matchAll(/\S+/g)) {
-    const last = m.index! + m[0].length - 1;
-    if (masked[last] === '_') return masked.slice(0, last) + latin[last] + masked.slice(last + 1);
-  }
-  return revealRandomLetter(latin, masked, rand);
-}
-
 const words = (text: string) => text.toLowerCase().split(/\s+/).filter(Boolean);
 
 /**
@@ -103,10 +94,7 @@ export function matchWords(latin: string, guess: string, found: number[] = []): 
   return [...next].sort((a, b) => a - b);
 }
 
-/**
- * Fills a player's found words (index → word) into a masked spell. Used by Hangman (on top of the
- * shared revealed letters) and Memorize (on top of all underscores).
- */
+/** Memorize: fills a player's found words (index → word) into the masked spell. */
 export function fillWords(masked: string, found: Record<number, string> = {}): string {
   return masked.split(' ').map((w, i) => found[i] ?? w).join(' ');
 }
@@ -121,10 +109,34 @@ export function spellWordCount(latin: string): number {
   return words(latin).length;
 }
 
-/** Uncovers one random hidden position of `masked`. Returns it unchanged when nothing is hidden. */
-export function revealRandomLetter(latin: string, masked: string, rand: Rand = Math.random): string {
-  const hidden = [...masked].flatMap((c, i) => (c === '_' ? [i] : []));
-  if (hidden.length === 0) return masked;
-  const i = hidden[Math.floor(rand() * hidden.length)];
-  return masked.slice(0, i) + latin[i] + masked.slice(i + 1);
+export const RPS_HANDS: RpsHand[] = ['rock', 'paper', 'scissors'];
+const RPS_BEATS: Record<RpsHand, RpsHand> = { rock: 'scissors', paper: 'rock', scissors: 'paper' };
+
+export const isRpsHand = (text: unknown): text is RpsHand => RPS_HANDS.includes(text as RpsHand);
+
+export const randomRpsHand = (rand: Rand = Math.random): RpsHand => RPS_HANDS[Math.floor(rand() * RPS_HANDS.length)];
+
+/** One throw: 'a' or 'b' wins, or null for a tie. No pick (null) loses to any pick; two missing picks tie. */
+export function rpsThrowWinner(a: RpsHand | null, b: RpsHand | null): 'a' | 'b' | null {
+  if (a === b) return null;
+  if (!b || (a && RPS_BEATS[a] === b)) return 'a';
+  return 'b';
+}
+
+/** MathIsMagic: both factors are drawn from this range (inclusive). Change it to make the sums easier or harder. */
+export const MATH_FACTOR = { min: 2, max: 9 } as const;
+/** MathIsMagic in training: right answers needed in the time limit to pass the round. */
+export const MATH_TRAINING_TARGET = 5;
+
+/** One multiplication with CHOICE_COUNT options (the product plus wrong ones), shuffled. */
+export function mathQuestion(rand: Rand = Math.random): MathQuestion {
+  const factor = () => MATH_FACTOR.min + Math.floor(rand() * (MATH_FACTOR.max - MATH_FACTOR.min + 1));
+  const a = factor();
+  const b = factor();
+  const answer = a * b;
+  // Wrong options are near misses: a neighbouring times-table result, or the product off by 1 or 10.
+  const nearMisses = [(a - 1) * b, (a + 1) * b, a * (b - 1), a * (b + 1), answer - 1, answer + 1, answer - 10, answer + 10];
+  const candidates = [...new Set(nearMisses)].filter((n) => n > 0 && n !== answer);
+  const wrong = shuffle(candidates, rand).slice(0, CHOICE_COUNT - 1);
+  return { a, b, options: shuffle([answer, ...wrong], rand) };
 }

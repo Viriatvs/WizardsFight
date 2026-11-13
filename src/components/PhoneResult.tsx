@@ -34,7 +34,9 @@ function TrainingResult({ end, onContinue, onExit, onStopTraining, error }: Omit
           {end.winnerColor ? (
             <>
               <div className="text-4xl font-black text-emerald-400">✓ Solved</div>
-              {end.durationMs !== null && <div className="text-gray-300 font-mono mt-2">⚡ {formatSeconds(end.durationMs)}</div>}
+              {winDetail(end)
+                ? <div className="text-gray-300 font-mono mt-2">{winDetail(end)}</div>
+                : end.durationMs !== null && <div className="text-gray-300 font-mono mt-2">⚡ {formatSeconds(end.durationMs)}</div>}
             </>
           ) : (
             <>

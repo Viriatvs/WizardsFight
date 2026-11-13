@@ -1,6 +1,9 @@
 export type RoomState = 'waiting' | 'countdown' | 'playing' | 'ended';
 export type PlayerColor = 'blue' | 'red';
-export type BattleMode = 'type' | 'translate' | 'describe' | 'hangman' | 'memorize' | 'puzzle';
+export type BattleMode = 'type' | 'translate' | 'describe' | 'memorize' | 'puzzle' | 'rps' | 'math';
+export type RpsHand = 'rock' | 'paper' | 'scissors';
+/** Rock Paper Scissors side: a player's color, or the computer wizard in training. */
+export type RpsSide = PlayerColor | 'cpu';
 
 /** One entry per finished round of the current game: the winner's color, or null for a draw. */
 export type RoundResults = Array<PlayerColor | null>;
@@ -33,7 +36,7 @@ export interface BattleEnd {
   winnerName: string | null;
   durationMs: number | null;
   /** Per player (keyed by socket id). Also the source of both names for the score table. */
-  results: Record<string, { color: PlayerColor; name: string; durationMs: number; correct: boolean; letters?: number }>;
+  results: Record<string, { color: PlayerColor; name: string; durationMs: number; correct: boolean; letters?: number; rightAnswers?: number }>;
   game: GameInfo;
   /** Memorize: nobody completed the spell, the winner had more correct letters (see results[].letters). */
   onLetters?: boolean;
@@ -53,10 +56,30 @@ export interface BattleEnd {
 export type SpellReveal =
   | { mode: 'type'; spell: SpellData; revealedAt: number }
   | { mode: 'translate' | 'describe'; latin: string; category: string; options: string[]; revealedAt: number; limitMs: number }
-  | { mode: 'hangman'; masked: string; english: string; category: string; revealedAt: number }
   | { mode: 'memorize'; latin: string; masked: string; english: string; category: string; revealedAt: number; memorizeMs: number }
   /** order[slot] = tile shown in that slot; both players get the same order. */
-  | { mode: 'puzzle'; image: string; cols: number; rows: number; order: number[]; revealedAt: number; limitMs: number };
+  | { mode: 'puzzle'; image: string; cols: number; rows: number; order: number[]; revealedAt: number; limitMs: number }
+  /** Throws follow as rps:throw / rps:result events. */
+  | { mode: 'rps'; winsNeeded: number; revealedAt: number }
+  /** The player's first question; the next ones arrive as math:next. */
+  | { mode: 'math'; question: MathQuestion; revealedAt: number; limitMs: number };
+
+/** MathIsMagic question: a × b, with the product among the options. The answer itself is never sent. */
+export interface MathQuestion { a: number; b: number; options: number[] }
+
+/** math:next (to one player): their next question, right answers so far, and whether the last pick was right. */
+export interface MathNext { question: MathQuestion; right: number; lastCorrect: boolean }
+
+/** rps:throw: a new throw starts; pick within limitMs. */
+export interface RpsThrow { throw: number; limitMs: number }
+
+/** rps:result: both hands of a throw (null = no pick in time), its winner (null = tie) and the throws won so far. */
+export interface RpsResult {
+  throw: number;
+  hands: Partial<Record<RpsSide, RpsHand | null>>;
+  winner: RpsSide | null;
+  wins: Partial<Record<RpsSide, number>>;
+}
 
 export interface Player {
   socketId: string;
@@ -93,14 +116,20 @@ export interface Room {
   mode: BattleMode | null;
   /** Translate/describe: players who picked a wrong option this round. */
   lockedOut: Set<string>;
-  /** Memorize/Hangman: spell word indices each player has typed correctly this round (socketId → indices). */
+  /** Memorize: spell word indices each player has typed correctly this round (socketId → indices). */
   foundWords: Map<string, number[]>;
+  /** Modes played in the current battle since the last time every mode had been used. */
+  modesUsed: BattleMode[];
   /** Results of the current game's finished rounds. Cleared when a new game starts or is cancelled. */
   roundResults: RoundResults;
   /** Winner's time per finished round (null for a draw/failed round); parallel to roundResults. */
   roundTimes: Array<number | null>;
   /** Training alone: one player, 5 rounds, nobody else may join. */
   solo: boolean;
+  /** Rock Paper Scissors: the current throw. `open` while picks are accepted; picks/wins keyed by socket id ('cpu' in training). */
+  rps: { throw: number; open: boolean; picks: Map<string, RpsHand>; wins: Map<string, number>; idleThrows: number };
+  /** MathIsMagic: the round's shared question list and each player's position in it and right answers (socketId →). */
+  math: { questions: MathQuestion[]; progress: Map<string, { index: number; right: number }> };
   /** Last puzzle picture used in this room, so the next Puzzle round shows a different one. */
   puzzleImage: string | null;
 }

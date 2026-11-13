@@ -1,7 +1,12 @@
 'use client';
 
 import { useState, useCallback, useEffect } from 'react';
+import Link from 'next/link';
 import { io, Socket } from 'socket.io-client';
+import FightTicker from '@/components/FightTicker';
+
+/** Looks like plain art (no pointer), but is a real link so keyboards can reach it too. */
+const EASTER_EGG = 'text-4xl sm:text-5xl cursor-default focus:outline-none focus-visible:ring-4 focus-visible:ring-amber-400';
 
 export default function LandingPage() {
   const [loading, setLoading] = useState(false);
@@ -33,9 +38,10 @@ export default function LandingPage() {
       <div className="text-center max-w-2xl mx-auto w-full">
         <div className="flex flex-col items-center mb-6">
           <div className="flex items-center justify-center gap-2 mb-3">
-            <span className="text-4xl sm:text-5xl">🧙‍♂️</span>
-            <span className="text-2xl sm:text-3xl text-red-500 animate-pulse">⚔️</span>
-            <span className="text-4xl sm:text-5xl">🧙‍♀️</span>
+            {/* Easter egg: the wizards open the hidden Fight History page. */}
+            <Link href="/history" aria-label="Fight history" className={EASTER_EGG}>🧙‍♂️</Link>
+            <span className="text-2xl sm:text-3xl text-red-500 animate-pulse" aria-hidden="true">⚔️</span>
+            <Link href="/history" aria-label="Fight history" className={EASTER_EGG}>🧙‍♀️</Link>
           </div>
 
           <h1
@@ -77,6 +83,8 @@ export default function LandingPage() {
         >
           {loading ? 'Creating battle…' : '⚔️ Start Fight'}
         </button>
+
+        <FightTicker />
 
         <div className="mt-10 flex flex-wrap items-center justify-center gap-x-4 gap-y-2 sm:gap-8 text-gray-500 text-xs sm:text-sm px-4 font-pixel uppercase tracking-wider">
           <span>2 Players Max</span>
