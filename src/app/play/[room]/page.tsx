@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, useEffect, useRef, use } from 'react';
+import { useState, useCallback, useEffect, useRef, use, type ReactNode } from 'react';
 import { io, Socket } from 'socket.io-client';
 import { useSearchParams } from 'next/navigation';
 import Countdown from '@/components/Countdown';
@@ -14,6 +14,7 @@ import { MODE_LABELS, fillWords } from '@/lib/modes';
 import { roundLabel } from '@/lib/game';
 import { TEAMS, MAX_TEAM_SIZE, bothTeamsPresent, otherTeam, teamSizes } from '@/lib/teams';
 import type { PlayerColor, GamePhase, BattleMode, SpellReveal, GameInfo, BattleEnd, RpsThrow, RpsResult, MathQuestion, MathNext } from '@/types/game';
+import PixelIcon, { WIZARD_ICON } from '@/components/PixelIcon';
 
 /** Where to send visitors of a room that no longer exists. The start page shows a notice for it. */
 const ROOM_EXPIRED_URL = '/?expired=1';
@@ -21,7 +22,12 @@ const ROOM_EXPIRED_URL = '/?expired=1';
 /** room:update player entry. */
 interface RoomPlayer { color: PlayerColor; name: string; socketId: string; fightReady: boolean; rematchReady: boolean }
 
-const TEAM_LABEL: Record<PlayerColor, string> = { blue: '🔵 Blue team', red: '🔴 Red team' };
+const TEAM_LABEL: Record<PlayerColor, ReactNode> = {
+  blue: <><PixelIcon name="wizardBlue" /> Blue team</>,
+  red: <><PixelIcon name="wizardRed" /> Red team</>,
+};
+/** How long the correct answer of a translate/describe round shows on the phone before the result. */
+const ANSWER_SHOW_MS = 3000;
 const TEAM_TEXT: Record<PlayerColor, string> = { blue: 'text-blue-400', red: 'text-red-400' };
 
 /** Memorize: this player's correctly typed words (index → word), from spell:progress. */
@@ -61,6 +67,8 @@ export default function PlayPage({ params }: { params: Promise<{ room: string }>
 
   const searchParams = useSearchParams();
   const preferredColor = searchParams.get('color') as PlayerColor | null;
+  /** Opened from the start page's Train alone: this private room trains as soon as the wizard has a name. */
+  const trainMode = searchParams.get('train') === '1';
 
   const [phase, setPhase] = useState<GamePhase>('connecting');
   const [name, setNameInput] = useState('');
@@ -90,6 +98,9 @@ export default function PlayPage({ params }: { params: Promise<{ room: string }>
   const [submitted, setSubmitted] = useState<{ correct: boolean; durationMs: number } | null>(null);
   const [graceSeconds, setGraceSeconds] = useState<number | null>(null);
   const graceTimerRef = useRef<ReturnType<typeof setInterval>>();
+  /** Translate/describe: the correct option, highlighted on the question for ANSWER_SHOW_MS before the result. */
+  const [choiceAnswer, setChoiceAnswer] = useState<string | null>(null);
+  const answerTimerRef = useRef<ReturnType<typeof setTimeout>>();
   const [battleEnd, setBattleEnd] = useState<BattleEnd | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -125,6 +136,8 @@ export default function PlayPage({ params }: { params: Promise<{ room: string }>
         setMath(null);
         setGraceSeconds(null);
         setBattleEnd(null);
+        clearTimeout(answerTimerRef.current);
+        setChoiceAnswer(null);
       }
       // Found by socket id: the team (color) can change in the waiting room.
       const me = data.players.find((p) => p.socketId === socket.id);
@@ -209,7 +222,14 @@ export default function PlayPage({ params }: { params: Promise<{ room: string }>
       if (graceTimerRef.current) clearInterval(graceTimerRef.current);
       setGame(data.game);
       setBattleEnd(data);
-      setPhase('ended');
+      clearTimeout(answerTimerRef.current);
+      if (!data.answer) return setPhase('ended');
+      // Choice rounds: keep the question up with the correct option highlighted, then the result.
+      setChoiceAnswer(data.answer);
+      answerTimerRef.current = setTimeout(() => {
+        setChoiceAnswer(null);
+        setPhase('ended');
+      }, ANSWER_SHOW_MS);
     });
 
     socket.on('player:disconnected', (data: { name: string }) => {
@@ -228,7 +248,10 @@ export default function PlayPage({ params }: { params: Promise<{ room: string }>
       setPhase('ended');
     });
 
-    return () => { socket.disconnect(); };
+    return () => {
+      clearTimeout(answerTimerRef.current);
+      socket.disconnect();
+    };
   }, [roomId]);
 
   const submitName = useCallback(() => {
@@ -240,12 +263,17 @@ export default function PlayPage({ params }: { params: Promise<{ room: string }>
         colorRef.current = res.color;
         setColor(res.color);
         setPhase('waiting');
+        if (trainMode) {
+          socketRef.current?.emit('player:solo', { roomId }, (r: { success: boolean; error?: string }) => {
+            if (!r.success) setError(r.error || 'Could not start training');
+          });
+        }
       } else {
         setError(res.error || 'Failed to join');
         setPhase('ended');
       }
     });
-  }, [name, roomId, preferredColor]);
+  }, [name, roomId, preferredColor, trainMode]);
 
   const pressFight = useCallback(() => {
     setError(null);
@@ -269,18 +297,12 @@ export default function PlayPage({ params }: { params: Promise<{ room: string }>
     });
   }, [roomId]);
 
-  // Training alone: start (only wizard alone in the room) and stop (room reopens for opponents).
-  const startAlone = useCallback(() => {
-    setError(null);
-    socketRef.current?.emit('player:solo', { roomId }, (res: { success: boolean; error?: string }) => {
-      if (!res.success) setError(res.error || 'Could not start training');
-    });
-  }, [roomId]);
-
+  // Training: quitting saves the session to the history and deletes the room.
   const stopTraining = useCallback(() => {
     setError(null);
     socketRef.current?.emit('player:solo:stop', { roomId }, (res: { success: boolean; error?: string }) => {
-      if (!res.success) setError(res.error || 'Could not stop training');
+      if (res.success) return window.location.assign('/');
+      setError(res.error || 'Could not quit training');
     });
   }, [roomId]);
 
@@ -331,7 +353,7 @@ export default function PlayPage({ params }: { params: Promise<{ room: string }>
             <span className="text-gray-500 mx-1">vs</span>
             <span className="text-red-400">Wizards</span>
           </h1>
-          {color && (
+          {color && !game?.training && (
             <div className={`inline-block mt-2 px-4 py-1 rounded-full border ${colorBg}`}>
               <span className={`font-bold text-sm uppercase tracking-wider ${colorClass}`}>
                 {TEAM_LABEL[color]}
@@ -347,14 +369,14 @@ export default function PlayPage({ params }: { params: Promise<{ room: string }>
 
         {phase === 'connecting' && (
           <div className="text-center py-12">
-            <div className="text-4xl mb-4 animate-spin inline-block">⏳</div>
+            <div className="text-4xl mb-4 animate-spin inline-block"><PixelIcon name="hourglass" /></div>
             <p className="text-gray-400 text-lg">Connecting to battle…</p>
           </div>
         )}
 
         {phase === 'name' && (
           <div className="panel-stone text-center px-6 py-10 mt-4">
-            <div className="text-5xl mb-4">🧙</div>
+            <div className="text-5xl mb-4"><PixelIcon name="wizardBlue" /></div>
             <label htmlFor="wizard-name" className="block font-pixel text-amber-300 text-xl mb-4">What is your wizard name?</label>
             <div className="max-w-xs mx-auto">
               <input
@@ -369,7 +391,7 @@ export default function PlayPage({ params }: { params: Promise<{ room: string }>
                 className="input-pixel"
               />
               <button onClick={submitName} disabled={!name.trim()} className="btn-pixel mt-8 w-full text-lg">
-                Enter Battle
+                {trainMode ? <><PixelIcon name="wizardBlue" /> Start training</> : 'Enter Battle'}
               </button>
             </div>
           </div>
@@ -377,7 +399,7 @@ export default function PlayPage({ params }: { params: Promise<{ room: string }>
 
         {phase === 'waiting' && (
           <div className="panel-stone text-center px-6 py-10 mt-4">
-            <div className="text-5xl mb-4 animate-bounce inline-block">🧙</div>
+            <div className="text-5xl mb-4 animate-bounce inline-block"><PixelIcon name={WIZARD_ICON[color ?? 'blue']} /></div>
             {game?.training ? (
               <p className="text-amber-300 text-lg font-bold">Training alone — starting…</p>
             ) : allReady ? (
@@ -389,7 +411,7 @@ export default function PlayPage({ params }: { params: Promise<{ room: string }>
             ) : (
               <div className="max-w-xs mx-auto">
                 <button onClick={pressFight} disabled={!teamsReady} className="btn-pixel w-full py-4 text-xl">
-                  ⚔️ Let&apos;s Fight
+                  <PixelIcon name="swords" /> Let&apos;s Fight
                 </button>
                 <p className="text-gray-400 text-sm mt-5">
                   {!teamsReady ? 'Waiting for a wizard on the other team…' : 'Press when you are ready to duel. After that your team is locked.'}
@@ -402,15 +424,6 @@ export default function PlayPage({ params }: { params: Promise<{ room: string }>
                   >
                     Switch to {TEAM_LABEL[otherTeam(color)]}
                   </button>
-                )}
-                {/* Only on pages opened from the main screen's wizard cards (?color=), while nobody else is here. */}
-                {preferredColor && playerCount === 1 && (
-                  <>
-                    <button onClick={startAlone} className="btn-pixel-secondary mt-8 w-full text-lg">
-                      🧙 Start alone
-                    </button>
-                    <p className="text-gray-400 text-sm mt-4">Train 5 rounds by yourself. Nobody else can join until you stop.</p>
-                  </>
                 )}
                 {/* Alone in the room (nobody joined yet, or the opponent left): leave and free the slot. */}
                 {playerCount === 1 && (
@@ -482,6 +495,7 @@ export default function PlayPage({ params }: { params: Promise<{ room: string }>
             onPick={submitSpell}
             result={submitted}
             deadline={deadline}
+            answer={choiceAnswer}
           />
         )}
 
@@ -511,7 +525,7 @@ export default function PlayPage({ params }: { params: Promise<{ room: string }>
 
         {error && phase === 'ended' && !battleEnd && (
           <div className="text-center py-8">
-            <div className="text-3xl mb-4">⚠️</div>
+            <div className="text-3xl mb-4"><PixelIcon name="warning" /></div>
             <p className="text-red-400 text-lg font-medium">{error}</p>
           </div>
         )}

@@ -1,6 +1,7 @@
 'use client';
 
 import type { GameScore, PlayerColor, RoundResults } from '@/types/game';
+import PixelIcon from '@/components/PixelIcon';
 
 interface ScoreTableProps {
   names: Partial<Record<PlayerColor, string>>;
@@ -43,7 +44,7 @@ export default function ScoreTable({ names, score, results, winner, large }: Sco
               >
                 <div className={large ? 'text-3xl' : 'text-xl'}>{names[c] || `${STYLE[c].label} Wizard`}</div>
                 <div className="text-xs font-bold tracking-widest opacity-80">
-                  {STYLE[c].label} wizard{winner === c ? ' · 🏆 winner' : ''}
+                  {STYLE[c].label} wizard{winner === c && <> · <PixelIcon name="trophy" /> winner</>}
                 </div>
               </th>
             ))}

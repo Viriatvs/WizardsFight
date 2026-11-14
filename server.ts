@@ -111,30 +111,35 @@ function endBattle(io: Server, room: Room, winner: Player | null, extra: Record<
     results,
     game: gameInfo(room),
     mode: room.mode,
+    ...(room.mode === 'translate' ? { answer: room.spell.english } : room.mode === 'describe' ? { answer: room.spell.description } : {}),
     ...extra,
   };
   io.to(room.id).emit('battle:end', payload);
+  // Screens track the room state from room:update; without this the main screen still thinks the round is on.
+  io.to(room.id).emit('room:update', roomToPayload(room));
   console.log(`[room ${room.id}] round ${payload.game.round} (${room.mode}) winner: ${winner?.color ?? 'none'}, game winner: ${payload.game.winner ?? '-'} ${JSON.stringify(extra)}`);
   recordFinishedGame(room, payload);
 }
 
-/** Fight History: a finished versus game (not training, not cancelled) is saved to data/fights.json. */
+/** Fight History: a finished versus game (not training, not cancelled), won or drawn, is saved to data/fights.json. */
 function recordFinishedGame(room: Room, end: BattleEnd) {
   const { game } = end;
-  if (room.solo || !game.over || !game.winner) return;
+  if (room.solo || !game.over) return;
   const names = teamNames(Object.values(end.results));
-  const loserColor: PlayerColor = game.winner === 'blue' ? 'red' : 'blue';
-  const winnerName = names[game.winner];
+  const winnerColor: PlayerColor = game.winner ?? 'blue'; // drawn game: blue listed first
+  const loserColor: PlayerColor = winnerColor === 'blue' ? 'red' : 'blue';
+  const winnerName = names[winnerColor];
   const loserName = names[loserColor];
   if (!winnerName || !loserName) return;
   saveFight({
     id: `${room.id}-${Date.now()}`,
     at: new Date().toISOString(),
-    winner: { name: winnerName, color: game.winner },
+    winner: { name: winnerName, color: winnerColor },
     loser: { name: loserName, color: loserColor },
-    score: { winner: game.score[game.winner], loser: game.score[loserColor] },
+    score: { winner: game.score[winnerColor], loser: game.score[loserColor] },
     draws: game.score.draws,
     rounds: game.results.length,
+    ...(game.winner ? {} : { draw: true as const }),
   });
 }
 
@@ -146,6 +151,7 @@ function recordFinishedGame(room: Room, end: BattleEnd) {
 function removePlayer(io: Server, room: Room, socketId: string) {
   const player = room.players.get(socketId);
   if (!player) return;
+  if (room.solo) return endTraining(io, room, player);
   io.to(room.id).emit('player:disconnected', { color: player.color, name: player.name });
   const teamEmptied = !Array.from(room.players.values()).some((p) => p.color === player.color && p.socketId !== socketId);
   if (room.state === 'playing' && teamEmptied) {
@@ -211,6 +217,30 @@ function continueWhenAllReady(io: Server, room: Room) {
     const r = getRoom(room.id);
     if (r && r.state === 'waiting') startBattle(io, r);
   }, PRE_BATTLE_DELAY_MS);
+}
+
+/** Deletes the room: stops its timers, tells every other screen (room:closed) and empties the Socket.IO room. */
+function closeRoom(io: Server, room: Room, except?: Socket) {
+  // Every timer checks the round/state before acting, so this stops anything still scheduled.
+  room.round++;
+  room.state = 'ended';
+  (except ? except.to(room.id) : io.to(room.id)).emit('room:closed');
+  io.in(room.id).socketsLeave(room.id);
+  deleteRoom(room.id);
+}
+
+/**
+ * The training wizard quits (Quit training, Exit or disconnect): the session goes into the fight history
+ * ("Merlin won 7 out of 10 games") and the room is deleted. Rounds still running are not counted.
+ */
+function endTraining(io: Server, room: Room, player: Player, except?: Socket) {
+  const played = room.roundResults.length;
+  const solved = room.roundResults.filter((r) => r !== null).length;
+  if (played > 0) {
+    saveFight({ kind: 'training', id: `${room.id}-${Date.now()}`, at: new Date().toISOString(), player: { name: player.name, color: player.color }, solved, played });
+  }
+  closeRoom(io, room, except);
+  console.log(`[room ${room.id}] training over: ${player.name} solved ${solved}/${played} — room deleted`);
 }
 
 /** Runs fn after ms, unless the round has moved on or ended meanwhile. */
@@ -429,12 +459,7 @@ app.prepare().then(() => {
         if (cb) cb({ success: false, error: 'Only the main screen of this room can close it' });
         return;
       }
-      // Stop anything still scheduled for this room: every timer checks the round/state before acting.
-      room.round++;
-      room.state = 'ended';
-      socket.to(room.id).emit('room:closed');
-      io.in(room.id).socketsLeave(room.id);
-      deleteRoom(room.id);
+      closeRoom(io, room, socket);
       socket.data.roomId = undefined;
       socket.data.role = undefined;
       console.log(`[room ${room.id}] closed by the main screen`);
@@ -673,7 +698,7 @@ app.prepare().then(() => {
       if (cb) cb({ success: true });
     });
 
-    // "Start alone": the only player in a waiting room starts a 5-round training session; the room closes to others.
+    // Train alone (start page → /play/:room?train=1): the only player in a waiting room starts training; the room closes to others.
     socket.on('player:solo', (payload: { roomId: string }, cb?: (result: { success: boolean; error?: string }) => void) => {
       const room = getRoom(payload.roomId);
       const player = room?.players.get(socket.id);
@@ -693,18 +718,17 @@ app.prepare().then(() => {
       if (cb) cb({ success: true });
     });
 
-    // "Stop training": back to a normal waiting room that opponents can join again.
+    // "Quit training": saves the session to the fight history and deletes the room. Allowed at any time.
     socket.on('player:solo:stop', (payload: { roomId: string }, cb?: (result: { success: boolean; error?: string }) => void) => {
-      const room = getRoom(payload.roomId);
-      if (!room || !room.solo || !room.players.has(socket.id) || room.state === 'countdown' || room.state === 'playing') {
-        if (cb) cb({ success: false, error: 'No training to stop right now' });
+      const room = getRoom(payload?.roomId);
+      const player = room?.players.get(socket.id);
+      if (!room || !room.solo || !player) {
+        if (cb) cb({ success: false, error: 'No training to quit right now' });
         return;
       }
-      room.solo = false;
-      newGame(room);
-      resetRoom(room);
-      io.to(room.id).emit('room:update', roomToPayload(room));
-      console.log(`[room ${room.id}] training stopped — room open again`);
+      socket.data.roomId = undefined;
+      socket.data.role = undefined;
+      endTraining(io, room, player, socket);
       if (cb) cb({ success: true });
     });
 

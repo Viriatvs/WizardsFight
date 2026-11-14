@@ -43,6 +43,7 @@ module.exports = {
       fontFamily: {
         sans: ['var(--font-body)', 'system-ui', 'sans-serif'],
         pixel: ['var(--font-pixel)', 'monospace'],
+        digits: ['var(--font-digits)', 'monospace'],
       },
     },
   },

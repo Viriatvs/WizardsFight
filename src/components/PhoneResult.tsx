@@ -6,6 +6,7 @@ import TrainingSummary from '@/components/TrainingSummary';
 import { roundLabel, drawReason, winDetail, formatSeconds } from '@/lib/game';
 import { teamNames } from '@/lib/teams';
 import type { BattleEnd, PlayerColor } from '@/types/game';
+import PixelIcon from '@/components/PixelIcon';
 
 interface PhoneResultProps {
   end: BattleEnd;
@@ -15,36 +16,29 @@ interface PhoneResultProps {
   opponentPresent: boolean;
   onContinue: () => void;
   onExit: () => void;
-  /** Training only: back to a normal waiting room that opponents can join. */
+  /** Training only: ends the session (saved to the history) and deletes the room. */
   onStopTraining: () => void;
   error?: string | null;
 }
 
 const COLOR_TEXT: Record<PlayerColor, string> = { blue: 'text-blue-400', red: 'text-red-400' };
 
-/** Training alone: Solved/Failed for the round, or the summary after the last round. */
-function TrainingResult({ end, onContinue, onExit, onStopTraining, error }: Omit<PhoneResultProps, 'myColor' | 'waiting' | 'opponentPresent'>) {
-  const { over } = end.game;
+/** Training alone: Solved/Failed for the round and the session so far; goes on until the wizard quits. */
+function TrainingResult({ end, onContinue, onStopTraining, error }: Omit<PhoneResultProps, 'myColor' | 'waiting' | 'opponentPresent'>) {
   return (
     <div className="text-center py-4">
-      {over ? (
-        <h2 className="text-3xl font-black text-amber-400">Training complete</h2>
+      <div className="text-sm font-bold uppercase tracking-widest text-gray-400 mb-1">{roundLabel(end.game.round, true)}</div>
+      {end.winnerColor ? (
+        <>
+          <div className="text-4xl font-black text-emerald-400">✓ Solved</div>
+          {winDetail(end)
+            ? <div className="text-gray-300 font-mono mt-2">{winDetail(end)}</div>
+            : end.durationMs !== null && <div className="text-gray-300 font-mono mt-2"><PixelIcon name="bolt" /> {formatSeconds(end.durationMs)}</div>}
+        </>
       ) : (
         <>
-          <div className="text-sm font-bold uppercase tracking-widest text-gray-400 mb-1">{roundLabel(end.game.round, true)}</div>
-          {end.winnerColor ? (
-            <>
-              <div className="text-4xl font-black text-emerald-400">✓ Solved</div>
-              {winDetail(end)
-                ? <div className="text-gray-300 font-mono mt-2">{winDetail(end)}</div>
-                : end.durationMs !== null && <div className="text-gray-300 font-mono mt-2">⚡ {formatSeconds(end.durationMs)}</div>}
-            </>
-          ) : (
-            <>
-              <div className="text-4xl font-black text-red-400">✗ Failed</div>
-              <p className="text-gray-400 mt-1">{drawReason(end)}</p>
-            </>
-          )}
+          <div className="text-4xl font-black text-red-400">✗ Failed</div>
+          <p className="text-gray-400 mt-1">{drawReason(end)}</p>
         </>
       )}
 
@@ -53,11 +47,8 @@ function TrainingResult({ end, onContinue, onExit, onStopTraining, error }: Omit
       </div>
 
       <div className="mt-8 flex flex-wrap gap-5 justify-center">
-        <button onClick={onContinue} className="btn-pixel">
-          {over ? '🔁 Train again' : '⚔️ Next round'}
-        </button>
-        <button onClick={onStopTraining} className="btn-pixel-secondary">Stop training</button>
-        <button onClick={onExit} className="btn-pixel-secondary">Exit</button>
+        <button onClick={onContinue} className="btn-pixel"><PixelIcon name="swords" /> Next round</button>
+        <button onClick={onStopTraining} className="btn-pixel-secondary">Quit training</button>
       </div>
       {error && <p role="alert" className="text-red-400 text-sm mt-4">{error}</p>}
     </div>
@@ -73,12 +64,18 @@ export default function PhoneResult(props: PhoneResultProps) {
   const teamMode = Object.keys(end.results).length > 2;
   const others = teamMode ? 'the other team' : 'your opponent';
   const gameWinner = end.game.winner;
-  const gameOver = end.game.over && !!gameWinner;
+  const gameOver = end.game.over;
   const continueLabel = gameOver ? 'Fight again' : 'Next round';
 
   return (
     <div className="text-center py-4">
-      {gameOver ? (
+      {gameOver && !gameWinner ? (
+        <>
+          <div className="text-sm font-bold uppercase tracking-widest text-gray-400 mb-1">Game over after 3 rounds</div>
+          <div className="text-4xl font-black text-gray-300">DRAW GAME</div>
+          <p className="text-gray-400 mt-1">Same number of round wins — nobody takes the game</p>
+        </>
+      ) : gameOver && gameWinner ? (
         <>
           {/* The whole animation fits the phone (object-contain), with the winner's name over it. */}
           <div className="relative w-full rounded-2xl overflow-hidden border-2 border-amber-500/40 bg-black">
@@ -94,7 +91,7 @@ export default function PhoneResult(props: PhoneResultProps) {
             </div>
           </div>
           <div className={`text-2xl font-black mt-4 ${myColor === gameWinner ? 'text-amber-400 animate-bounce' : 'text-gray-400'}`}>
-            {myColor === gameWinner ? `🎉 ${teamMode ? 'Your team wins' : 'You win'} the game! 🎉` : `${teamMode ? 'Your team' : 'You'} lost the game`}
+            {myColor === gameWinner ? <><PixelIcon name="sparkle" /> {teamMode ? 'Your team wins' : 'You win'} the game! <PixelIcon name="sparkle" /></> : `${teamMode ? 'Your team' : 'You'} lost the game`}
           </div>
         </>
       ) : (
@@ -105,16 +102,16 @@ export default function PhoneResult(props: PhoneResultProps) {
               <div className={`text-4xl font-black break-words ${COLOR_TEXT[end.winnerColor]}`}>{end.winnerName}</div>
               <div className="text-gray-300 text-lg mt-1">wins the round</div>
               <div className={`text-xl font-bold mt-3 ${myColor === end.winnerColor ? 'text-amber-400' : 'text-gray-500'}`}>
-                {myColor === end.winnerColor ? `🎉 ${teamMode ? 'Your team won the round!' : 'Round won!'}` : 'Round lost'}
+                {myColor === end.winnerColor ? <><PixelIcon name="sparkle" /> {teamMode ? 'Your team won the round!' : 'Round won!'}</> : 'Round lost'}
               </div>
-              {end.durationMs !== null && <div className="text-gray-400 font-mono mt-2">⚡ {end.durationMs.toLocaleString()} ms</div>}
+              {end.durationMs !== null && <div className="text-gray-400 font-mono mt-2"><PixelIcon name="bolt" /> {end.durationMs.toLocaleString()} ms</div>}
               {end.graceTimeout && <p className="text-gray-400 text-sm mt-1">{teamMode ? 'The others' : 'Opponent'} did not cast in time</p>}
               {end.forfeit && <p className="text-gray-400 text-sm mt-1">{teamMode ? 'The other team' : 'Opponent'} left the battle</p>}
               {winDetail(end) && <p className="text-gray-300 font-mono mt-2">{winDetail(end)}</p>}
             </>
           ) : (
             <>
-              <div className="text-4xl mb-2">💀</div>
+              <div className="text-4xl mb-2"><PixelIcon name="skull" /></div>
               <div className="text-3xl font-black text-gray-400">DRAW</div>
               <p className="text-gray-500 mt-1">{drawReason(end)}</p>
             </>
@@ -129,14 +126,18 @@ export default function PhoneResult(props: PhoneResultProps) {
       {gameOver && !opponentPresent && <p className="text-gray-400 text-sm mt-4">{others[0].toUpperCase() + others.slice(1)} left the room.</p>}
 
       {waiting ? (
-        <p className="text-amber-300 font-bold mt-8 animate-pulse">Waiting for {teamMode ? 'the other wizards' : 'your opponent'} to press {continueLabel}…</p>
+        <>
+          <p className="text-amber-300 font-bold mt-8 animate-pulse">Waiting for {teamMode ? 'the other wizards' : 'your opponent'} to press {continueLabel}…</p>
+          {/* After the game you can still change your mind and leave. */}
+          {gameOver && <button onClick={onExit} className="btn-pixel-secondary mt-5">Quit</button>}
+        </>
       ) : (
         <div className="mt-8 flex flex-wrap gap-5 justify-center">
           <button onClick={onContinue} className="btn-pixel">
-            ⚔️ {continueLabel}
+            <PixelIcon name="swords" /> {continueLabel}
           </button>
           <button onClick={onExit} className="btn-pixel-secondary">
-            Exit
+            {gameOver ? 'Quit' : 'Exit'}
           </button>
         </div>
       )}

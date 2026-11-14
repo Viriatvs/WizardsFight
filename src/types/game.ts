@@ -24,7 +24,7 @@ export interface GameInfo {
   winner: PlayerColor | null;
   /** The game (or training session) is finished: show the final screen. */
   over: boolean;
-  /** Training alone ("Start alone"): 5 rounds, each solved or failed; the room is closed to new players. */
+  /** Training alone ("Start alone"): rounds solved or failed until the wizard quits; the room is closed to new players. */
   training: boolean;
   /** Per finished round: the winner's time in ms, or null (draw / failed). */
   times: Array<number | null>;
@@ -48,6 +48,8 @@ export interface BattleEnd {
   forfeit?: boolean;
   /** Won by the whole team (team average or team throws); winnerName is then the team's names. */
   teamWin?: boolean;
+  /** Translate/describe: the correct option, sent only once the round is over. */
+  answer?: string;
 }
 
 /**
@@ -126,7 +128,7 @@ export interface Room {
   roundResults: RoundResults;
   /** Winner's time per finished round (null for a draw/failed round); parallel to roundResults. */
   roundTimes: Array<number | null>;
-  /** Training alone: one player, 5 rounds, nobody else may join. */
+  /** Training alone: one player, as many rounds as they like, nobody else may join. Quitting deletes the room. */
   solo: boolean;
   /** Rock Paper Scissors: the current throw. `open` while picks are accepted; picks/wins keyed by socket id ('cpu' in training). */
   rps: { throw: number; open: boolean; picks: Map<string, RpsHand>; wins: Map<string, number>; idleThrows: number };

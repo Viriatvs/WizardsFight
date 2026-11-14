@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import PixelIcon from '@/components/PixelIcon';
 
 interface ChoiceInputProps {
   latin: string;
@@ -13,9 +14,11 @@ interface ChoiceInputProps {
   result: { correct: boolean; durationMs: number } | null;
   /** Local timestamp when the round ends in a draw. */
   deadline: number | null;
+  /** Set once the round is over: the correct option, highlighted for a few seconds. */
+  answer?: string | null;
 }
 
-export default function ChoiceInput({ latin, category, question, options, onPick, result, deadline }: ChoiceInputProps) {
+export default function ChoiceInput({ latin, category, question, options, onPick, result, deadline, answer }: ChoiceInputProps) {
   const [picked, setPicked] = useState<string | null>(null);
   const [now, setNow] = useState(() => Date.now());
 
@@ -26,7 +29,7 @@ export default function ChoiceInput({ latin, category, question, options, onPick
   }, [picked]);
 
   const pick = (option: string) => {
-    if (picked) return;
+    if (picked || answer) return;
     setPicked(option);
     onPick(option);
   };
@@ -34,6 +37,10 @@ export default function ChoiceInput({ latin, category, question, options, onPick
   const secondsLeft = deadline ? Math.max(0, Math.ceil((deadline - now) / 1000)) : null;
 
   const optionClass = (option: string) => {
+    if (answer) {
+      if (option === answer) return 'border-emerald-500 bg-emerald-500/20 text-emerald-100';
+      return option === picked ? 'border-red-500 bg-red-500/15 text-red-200 opacity-70' : 'border-gray-700 text-gray-500 opacity-50';
+    }
     if (option !== picked) return picked ? 'border-gray-700 text-gray-500 opacity-50' : 'border-gray-600 bg-stone-dark/80 text-gray-100 hover:border-amber-500 hover:bg-amber-500/10';
     if (!result) return 'border-amber-500 bg-amber-500/10 text-amber-200';
     return result.correct ? 'border-emerald-500 bg-emerald-500/15 text-emerald-200' : 'border-red-500 bg-red-500/15 text-red-200';
@@ -41,8 +48,8 @@ export default function ChoiceInput({ latin, category, question, options, onPick
 
   return (
     <div className="flex flex-col items-center gap-5 py-6 w-full max-w-lg mx-auto px-4">
-      {secondsLeft !== null && !picked && (
-        <div className={`font-mono text-lg ${secondsLeft <= 3 ? 'text-red-400 font-bold' : 'text-gray-400'}`}>⏳ {secondsLeft}s left</div>
+      {secondsLeft !== null && !picked && !answer && (
+        <div className={`font-mono text-lg ${secondsLeft <= 3 ? 'text-red-400 font-bold' : 'text-gray-400'}`}><PixelIcon name="hourglass" /> {secondsLeft}s left</div>
       )}
 
       <div className="panel-stone text-center w-full px-4 py-5">
@@ -58,17 +65,23 @@ export default function ChoiceInput({ latin, category, question, options, onPick
           <button
             key={option}
             onClick={() => pick(option)}
-            disabled={!!picked}
+            disabled={!!picked || !!answer}
             className={`w-full min-h-[44px] px-4 py-3 text-left text-base font-sans border-4 transition-colors disabled:cursor-not-allowed
               focus:outline-none focus-visible:ring-4 focus-visible:ring-amber-400 ${optionClass(option)}`}
           >
-            {option}
+            {option === answer && <span className="sr-only">Correct answer: </span>}
+            {option === answer ? '✓ ' : ''}{option}
           </button>
         ))}
       </div>
 
-      {result?.correct && <div className="text-3xl font-bold text-emerald-400 animate-bounce">✓ CORRECT</div>}
-      {result && !result.correct && (
+      {answer ? (
+        <p role="status" className="text-center text-lg font-bold text-emerald-300">
+          The correct {question} is highlighted
+        </p>
+      ) : null}
+      {!answer && result?.correct && <div className="text-3xl font-bold text-emerald-400 animate-bounce">✓ CORRECT</div>}
+      {!answer && result && !result.correct && (
         <div className="text-center">
           <div className="text-2xl font-black text-red-400 animate-shake uppercase">Wrong!</div>
           <p className="text-gray-400 text-sm mt-1">You&apos;re out this round. Waiting for the others…</p>

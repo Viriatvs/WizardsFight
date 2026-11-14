@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { fightDate, type FightRecord } from '@/lib/fights';
+import { fightDate, isTraining, type FightRecord } from '@/lib/fights';
 import type { PlayerColor } from '@/types/game';
 
 /** How long each duel stays on the line before the next one slides up. */
@@ -11,12 +11,22 @@ const SLIDE_MS = 500;
 const NAME_COLOR: Record<PlayerColor, string> = { blue: 'text-blue-400', red: 'text-red-400' };
 
 function FightLine({ fight }: { fight: FightRecord }) {
+  if (isTraining(fight)) {
+    return (
+      <li className="h-6 leading-6 truncate">
+        <span className={`font-pixel ${NAME_COLOR[fight.player.color]}`}>{fight.player.name}</span>
+        {` won ${fight.solved} out of ${fight.played} game${fight.played === 1 ? '' : 's'} in training on ${fightDate(fight.at)}`}
+      </li>
+    );
+  }
   return (
     <li className="h-6 leading-6 truncate">
       <span className={`font-pixel ${NAME_COLOR[fight.winner.color]}`}>{fight.winner.name}</span>
-      {' won against '}
+      {fight.draw ? ' and ' : ' won against '}
       <span className={`font-pixel ${NAME_COLOR[fight.loser.color]}`}>{fight.loser.name}</span>
-      {` with ${fight.rounds} round${fight.rounds === 1 ? '' : 's'} on ${fightDate(fight.at)}`}
+      {fight.draw
+        ? ` drew ${fight.score.winner}–${fight.score.loser} on ${fightDate(fight.at)}`
+        : ` with ${fight.rounds} round${fight.rounds === 1 ? '' : 's'} on ${fightDate(fight.at)}`}
     </li>
   );
 }
@@ -54,9 +64,9 @@ export default function FightTicker() {
   }, [count]);
 
   return (
-    <section aria-label="Latest duels" className="mt-10 mx-auto w-full max-w-md text-center text-sm text-gray-300">
+    <section aria-label="Today's duels" className="mt-10 mx-auto w-full max-w-md text-center text-sm text-gray-300">
       {fights === null && <div className="h-6 bg-gray-800/70 animate-pulse" aria-hidden="true" />}
-      {fights?.length === 0 && <p className="h-6 leading-6">No duels recorded yet. Be the first legend!</p>}
+      {fights?.length === 0 && <p className="h-6 leading-6">No duels yet today. Be the first legend!</p>}
       {fights && count > 0 && (
         <div className="h-6 overflow-hidden">
           <ul

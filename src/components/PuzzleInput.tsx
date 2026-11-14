@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { isSolved } from '@/lib/modes';
+import PixelIcon from '@/components/PixelIcon';
 
 interface PuzzleInputProps {
   image: string;
@@ -61,7 +62,7 @@ export default function PuzzleInput({ image, cols, rows, initialOrder, onSolved,
     <div className="flex flex-col items-center gap-4 py-4 w-full">
       <div className="flex items-center gap-4 font-mono text-gray-400">
         {secondsLeft !== null && !solved && (
-          <span className={secondsLeft <= 10 ? 'text-red-400 font-bold' : ''}>⏳ {secondsLeft}s left</span>
+          <span className={secondsLeft <= 10 ? 'text-red-400 font-bold' : ''}><PixelIcon name="hourglass" /> {secondsLeft}s left</span>
         )}
         <span>{moves} move{moves === 1 ? '' : 's'}</span>
       </div>
@@ -93,7 +94,7 @@ export default function PuzzleInput({ image, cols, rows, initialOrder, onSolved,
       {result?.correct && (
         <div className="text-center">
           <div className="text-3xl font-bold text-emerald-400 animate-bounce">✓ SOLVED</div>
-          <div className="text-gray-400 font-mono">⚡ {result.durationMs.toLocaleString()} ms</div>
+          <div className="text-gray-400 font-mono"><PixelIcon name="bolt" /> {result.durationMs.toLocaleString()} ms</div>
         </div>
       )}
     </div>

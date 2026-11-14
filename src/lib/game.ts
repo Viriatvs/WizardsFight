@@ -5,8 +5,8 @@ import type { PlayerColor, RoundResults, GameScore, BattleEnd } from '@/types/ga
 
 export type { RoundResults, GameScore };
 
-export const BASE_ROUNDS = 3;
-export const WINS_NEEDED = 2;
+/** A versus game is always exactly this many rounds. */
+export const GAME_ROUNDS = 3;
 
 export function gameScore(results: RoundResults): GameScore {
   const score: GameScore = { blue: 0, red: 0, draws: 0 };
@@ -18,23 +18,19 @@ export function gameScore(results: RoundResults): GameScore {
 }
 
 /**
- * Best of 3: first to 2 round wins. If 3 rounds are played without that and the score is level,
- * extra rounds are played until someone is ahead. Returns the game winner, or null while the game goes on.
+ * All 3 rounds are always played; then whoever won more rounds wins the game. Returns null while the game
+ * goes on, and for a drawn game (level after 3 rounds).
  */
 export function gameWinner(results: RoundResults): PlayerColor | null {
+  if (results.length < GAME_ROUNDS) return null;
   const { blue, red } = gameScore(results);
-  if (blue >= WINS_NEEDED) return 'blue';
-  if (red >= WINS_NEEDED) return 'red';
-  if (results.length >= BASE_ROUNDS && blue !== red) return blue > red ? 'blue' : 'red';
-  return null;
+  if (blue === red) return null;
+  return blue > red ? 'blue' : 'red';
 }
 
-/** Training alone is always this many rounds. */
-export const TRAINING_ROUNDS = 5;
-
-/** A versus game is over once it has a winner; a training session after TRAINING_ROUNDS rounds. */
+/** A versus game is over after 3 rounds, won or drawn. Training never is: it goes on until the wizard quits. */
 export function isGameOver(results: RoundResults, training: boolean): boolean {
-  return training ? results.length >= TRAINING_ROUNDS : gameWinner(results) !== null;
+  return !training && results.length >= GAME_ROUNDS;
 }
 
 /** Training summary: rounds played, solved, failed and the best (lowest) solved time. */
@@ -44,10 +40,9 @@ export function trainingSummary(results: RoundResults, times: Array<number | nul
   return { played: results.length, solved, failed: results.length - solved, best: solvedTimes.length ? Math.min(...solvedTimes) : null };
 }
 
-/** Label for a round number (1-based), e.g. "Round 2", "Round 4 · Extra round" or "Training · Round 2 of 5". */
+/** Label for a round number (1-based), e.g. "Round 2 of 3" or "Training · Round 2". */
 export function roundLabel(round: number, training = false): string {
-  if (training) return `Training · Round ${round} of ${TRAINING_ROUNDS}`;
-  return round > BASE_ROUNDS ? `Round ${round} · Extra round` : `Round ${round}`;
+  return training ? `Training · Round ${round}` : `Round ${round} of ${GAME_ROUNDS}`;
 }
 
 /** "1.84 s" */

@@ -8,12 +8,12 @@ A real-time spell-casting duel between two teams, Blue and Red (1 to 4 wizards e
 
 1. The **host (main) screen** creates a battle room and shows a QR code.
 2. Two players scan the QR with their **phones**. Each enters a wizard name and gets a color, **blue** or **red**.
-3. Both players press **Let's Fight**. A **game** starts: best of 3 rounds (see "Games and rounds").
+3. Both players press **Let's Fight**. A **game** starts: always 3 rounds (see "Games and rounds").
 4. Every round, every screen shows the round number and the round's **mode**, then a countdown (3, 2, 1, FIGHT!).
 5. Both phones get the same Latin spell, presented according to the mode (see "Battle modes"). The fastest **correct** answer wins the round.
 6. The main screen shows the winner animation with the winner's name, then the score. The phones show the result and a **Next round** button.
-7. When the game is decided, the main screen shows the game winner, then returns to the waiting room. The phones show the animation, a side-by-side score table, and **Fight again** / **Exit**.
-8. A single wizard can also **train alone**: on a page opened from a wizard card on the main screen, **Start alone** runs 5 rounds by themselves while the room is closed to others (see "Training alone").
+7. After round 3 every screen announces the game winner (or a drawn game). The main screen keeps the final result up; the phones show the animation, a side-by-side score table, and **Fight again** / **Quit**.
+8. A single wizard can also **train alone**: **Train alone** on the start page goes straight to the phone, with no main screen or QR code. They play as many rounds as they like; quitting saves the session to the history and deletes its private room (see "Training alone").
 
 The main screen also has a copy-link button after the room link under the QR code (`CopyLinkButton`), so a player can send the join link to an opponent.
 
@@ -65,7 +65,7 @@ server.ts                  HTTP server: Next request handler + Socket.IO server 
 src/
   types/game.ts            Room, Player, Submission, SpellData, RoomState, PlayerColor, GamePhase, SpellReveal,
                            RoundResults, GameScore, GameInfo, BattleEnd (shared payload types)
-  lib/game.ts              Game rules: gameScore, gameWinner (best of 3 + extra rounds), roundLabel (+ game.test.ts)
+  lib/game.ts              Game rules: gameScore, gameWinner (3 rounds, most wins; level = drawn game), roundLabel (+ game.test.ts)
   lib/teams.ts             Teams: MAX_PLAYERS, MAX_TEAM_SIZE, pickTeam, bothTeamsPresent, teamNames, teamAverages, higherTeam (+ teams.test.ts)
   lib/rooms.ts             In-memory room store: createRoom / getRoom / deleteRoom / sweepAbandonedRooms (+ rooms.test.ts)
   lib/spells.ts            Server-only: parses /spells.md at startup + randomSpell(excludeLatin)
@@ -85,7 +85,11 @@ src/
                            SpellInput (typing modes: full spell / letter slots / memorize phase), ChoiceInput (4 options),
                            ScoreTable (Blue vs Red: won/lost/draws + per-round chips),
                            PhoneResult (phone screen after a round or game; training variant), PuzzleInput (puzzle board), RpsInput + RpsIcon (Rock Paper Scissors picks, pixel-art hands), MathInput (Math Is Magic),
-                           TrainingSummary (played/solved/failed/best + per-round chips), CopyLinkButton
+                           TrainingSummary (played/solved/failed/best + per-round chips), CopyLinkButton,
+                           PixelIcon (all 16x16 pixel icons, used instead of emoji; WIZARD_ICON per team),
+                           BattleMusic (main screen only: looping music + on/off toggle top right, choice kept in
+                           localStorage `wf-music`; starts on the first click/key if the browser blocks autoplay)
+public/music/              mage_duel_16bit_DARK_BATTLE_loop.ogg (BattleMusic)
 public/images/             Battlefield scenes (empty / blue ready / red ready / both) + victory GIFs per color
                            + puzzle pictures (600x800, 3:4) listed in `PUZZLE_IMAGES` (modes.ts): puzzle-red-wizard.webp
                            (crop of red-wizard_ready.png at x1190 y70 w420 h560), puzzle-blue-wizard.webp,
@@ -109,7 +113,7 @@ The server is authoritative. Pages are `'use client'`. Each page opens its own S
 ## Flows
 
 ### 1. Create room (landing page `/`)
-`socket.emit('room:create', cb)`, which returns `{ roomId }`. The page then disconnects the socket and navigates to `/battle/:roomId`.
+`socket.emit('room:create', cb)`, which returns `{ roomId }`. The page then disconnects the socket and navigates to `/battle/:roomId` (**Start Fight**) or to `/play/:roomId?train=1` (**Train alone**: the room is only used for that phone's training and never gets a main screen).
 
 ### 2. Host screen (`/battle/:room`)
 - Emits `room:watch {roomId}`. The server sets `hostSocketId`, joins the socket to the Socket.IO room, and returns the room payload.
@@ -149,7 +153,7 @@ Time is always measured on the server: `durationMs = serverNow - spellRevealedAt
 | Mode (`BattleMode`) | Label | `spell:reveal` payload | Phone UI | Answering | Ends |
 |---|---|---|---|---|---|
 | `type` | Speed Cast | `{spell, revealedAt}` | `SpellInput`: Latin, English, description | Type it; unlimited retries | Both correct → fastest wins. One correct → `grace {seconds:3}`, then they win (`graceTimeout`). Draw after 30 s (`timedOut`). |
-| `translate` | Translate | `{latin, category, options[4], revealedAt, limitMs}` | `ChoiceInput`: Latin + 4 English translations | **One pick.** A wrong pick puts you in `lockedOut` for the round. | First correct pick wins. All players wrong → draw (`allWrong`). Draw after 15 s (`timedOut`). |
+| `translate` | Translate | `{latin, category, options[4], revealedAt, limitMs}` | `ChoiceInput`: Latin + 4 English translations | **One pick.** A wrong pick puts you in `lockedOut` for the round. | First correct pick wins. All players wrong → draw (`allWrong`). Draw after 15 s (`timedOut`). `battle:end` carries `answer` (the correct option); phones keep the question up with it highlighted for 3 s (`ANSWER_SHOW_MS`) before the result. |
 | `describe` | Describe | Same as translate | `ChoiceInput`: Latin + 4 descriptions | Same as translate | Same as translate |
 | `puzzle` | Puzzle | `{image, cols:3, rows:4, order[12], revealedAt, limitMs}` (same picture and scramble for both, never pre-solved; the picture is random from `PUZZLE_IMAGES`, never the room's previous one: `randomPuzzleImage`, `room.puzzleImage`) | `PuzzleInput`: 12 tile buttons, each showing its part of the picture via CSS `background-position`. Tap two tiles to swap; no preview. | When the picture is complete the phone sends its order as `"0,1,…,11"`; the server checks `isSolved` (unsolved arrangements are ignored). | First solved wins. Draw after 60 s (`PUZZLE_LIMIT_MS`, `timedOut`). |
 | `memorize` | Memorize | `{latin, masked, english, category, revealedAt, memorizeMs}` | Latin + "MEMORIZE IT" for 5 s (no input), then `spell:hide {limitMs: 30000}` → dashes + English hint + "N of M words found" + input | Type any words, any number of times. Each correct word (`matchWords`: any position, case-insensitive, repeats all found) is stored in `room.foundWords` and revealed **for that player only** via `spell:progress {words, found, total}`. A guess with no new word → `spell:submitted {correct:false}`. Submits during the 5 s phase are ignored. | First to find every word wins. At 30 s (`MEMORIZE_LIMIT_MS`): more correct letters (`lettersFound`) wins (`onLetters`, `results[].letters`); equal letters (incl. 0–0) is a draw (`timedOut`). |
@@ -168,10 +172,12 @@ Every way a round ends goes through `endBattle(io, room, winner, extra)` in `ser
 Payload (`BattleEnd` type): `{winnerColor, winnerName, durationMs, results: {[socketId]: {color,name,durationMs,correct,letters?}}, game: GameInfo, mode, timedOut?, graceTimeout?, allWrong?, forfeit?, onLetters?}`. `durationMs` in `results` is -1 when that player has no correct answer. `results` also gives both names for the score table. Result screens use `drawReason(end)` and `winDetail(end)` (game.ts) for the "why" line, e.g. "Won on letters: 12 vs 9".
 
 ### 7. Games and rounds (`src/lib/game.ts`)
-- **Best of 3:** the game ends as soon as a player has **2 round wins**. If 3 rounds have been played and the score is level (e.g. win, draw, loss, or 3 draws), **extra rounds** follow until one player is ahead. Draws count as rounds played. `gameWinner(results)` returns the winner or null while the game goes on.
-- `roundLabel(n)`: "Round 2", or "Round 4 · Extra round" past round 3.
+- **3 rounds (`GAME_ROUNDS`):** every versus game plays all 3 rounds, even after a 2–0 lead; there are no extra rounds. Then whoever has more round wins takes the game; a level score (e.g. win, draw, loss, or 3 draws) is a **drawn game**. Draws count as rounds played. `gameWinner(results)` returns the winner, or null while the game goes on and for a drawn game; `isGameOver` is true after 3 rounds.
+- `roundLabel(n)`: "Round 2 of 3".
+- **Main screen after the game:** the victory animation (or "DRAW GAME"), then a **Game over** screen with the winner (or "Drawn game") and the score table, until the wizards press Fight again or a team empties (then the waiting room, with a "Last game" banner).
+- **History:** drawn games are saved too (`draw: true`, blue listed as `winner`): "Merlin and Morgana drew 1–1 on …".
 - **Phone after a round** (`PhoneResult`): who won the round, ms, the score table, and **Next round** / **Exit**.
-- **Phone after the game:** the victory GIF fitted to the phone (`object-contain`) with the game winner's name over it, "You win the game!" or "You lost the game", the side-by-side `ScoreTable` (won / lost / draws per player + one chip per round), and **Fight again** / **Exit**.
+- **Phone after the game:** the victory GIF fitted to the phone (`object-contain`) with the game winner's name over it, "You win the game!" or "You lost the game", the side-by-side `ScoreTable` (won / lost / draws per player + one chip per round), and **Fight again** / **Quit**. A drawn game shows "DRAW GAME" instead of the GIF. Quit only takes that wizard out of the room (it stays available while waiting for the others to press Fight again).
 - **Next round** and **Fight again** both emit `player:reset` (`rematchReady`). When all players pressed it:
   - the room resets to `waiting` with every player's `fightReady = true`, so screens show "battle starting", not Let's Fight;
   - after a game over, `roundResults` is cleared first (new game at 0–0);
@@ -180,16 +186,21 @@ Payload (`BattleEnd` type): `{winnerColor, winnerName, durationMs, results: {[so
   While the opponent hasn't pressed yet, the server emits `rematch:waiting {waitingFor}`.
 
 ### 7b. Training alone (`room.solo`)
-- **Start alone** is shown on the phone's waiting screen only on pages opened from the main screen's wizard cards (`?color=` in the URL) and only while that wizard is alone. The server doesn't check how the page was opened. The button emits `player:solo`, which the server accepts only in `waiting` with exactly 1 player. It sets `room.solo`, starts a new game, and starts round 1 after 2 s (`startBattle` needs only 1 player when `solo`).
-- **Room closed:** `room:join` is refused with "This room is in training mode…". The main screen shows "Training — room closed to new players".
-- **5 rounds** (`TRAINING_ROUNDS`, `isGameOver(results, true)`). Modes and limits are as normal. A round is **solved** (the player is the round "winner", time in `game.times`) or **failed** (`null`). Rule tweaks:
+- **Starting:** the phone page opened with `?train=1` shows **Start training** instead of Enter Battle. Right after `room:join` it emits `player:solo`, which the server accepts only in `waiting` with exactly 1 player. It sets `room.solo`, starts a new game, and starts round 1 after 2 s (`startBattle` needs only 1 player when `solo`). Rooms with a main screen have no way to start training.
+- **Room closed:** `room:join` is refused with "This room is in training mode…". The phone hides its team badge during training.
+- **No round limit:** training is never over on its own (`isGameOver(results, true)` is always false); it goes on until the wizard quits. Modes and limits are as normal. A round is **solved** (the player is the round "winner", time in `game.times`) or **failed** (`null`). Rule tweaks:
   - Speed Cast ends as soon as every player in the room answered;
   - a wrong Translate/Describe pick fails the round;
   - Memorize never wins on letters in training (`endMemorizeOnLetters`).
-- Labels use `roundLabel(round, true)` ("Training · Round 2 of 5"). Fail messages use `drawReason` (training wording). Summaries use `trainingSummary()` and `<TrainingSummary>`.
-- **Phone:** Solved/Failed plus the summary, with **Next round** / **Stop training** / **Exit**. After round 5 it shows "Training complete" with **Train again** (`player:reset`, a new session) / **Stop training** / **Exit**.
-- **Main screen:** the animation with the player's name for a solved round, or "FAILED", then a training scoreboard. After round 5 it goes back to the waiting view with a "Last training: Merlin solved 4/5, best 1.84 s" banner.
-- **Stop training** emits `player:solo:stop`, which is allowed between rounds or after the session. It clears `solo` and the score and returns to `waiting`, so an opponent can join. The training player leaving also clears `solo`.
+- Labels use `roundLabel(round, true)` ("Training · Round 12"). Fail messages use `drawReason` (training wording). Summaries use `trainingSummary()` and `<TrainingSummary>` (chips for the latest 10 rounds only).
+- **Phone:** Solved/Failed plus the summary, with **Next round** / **Quit training**.
+- **Main screen:** none. Training rooms are never watched, so the main screen page has no training views.
+- **Quitting** (`player:solo:stop` from Quit training, or the wizard leaving/disconnecting via `removePlayer`) is allowed at any time and goes through `endTraining()`: if at least one round finished it saves a training record to the history ("Merlin won 7 out of 10 games in training"; a round still running doesn't count), then `closeRoom()` deletes the room. The quitting phone goes to `/`, where the session shows in today's duels.
+
+### 7c. Fight history (`src/lib/fights.ts`, `src/lib/fightStore.ts`, `data/fights.json`)
+- Saved on the server: a finished versus game (`recordFinishedGame`: winner/loser team names, score, rounds) and a quit training session (`endTraining`: `kind: 'training'`, solved / played).
+- **Today only:** the history covers the current UTC day (`isSameDay`, matching `fightDate`). `saveFight` drops earlier days' records, and `readTodaysFights` hides them until then. The start page's one-line ticker (`/api/fights/recent`) and `/history` both read today's fights.
+- The file is lost on every Render redeploy/restart (free plan, no disk).
 
 ### 8. Leaving
 - **Exit** (phone) emits `player:exit`, then the phone goes to `/`. A socket `disconnect` does the same. Both go through `removePlayer()`:
@@ -218,8 +229,8 @@ Payload (`BattleEnd` type): `{winnerColor, winnerName, durationMs, results: {[so
 | `spell:submit` | phone → server | `{roomId, text}` |
 | `player:reset` | phone → server | `{roomId}` (Next round / Fight again) |
 | `player:exit` | phone → server | `{roomId}` |
-| `player:solo` | phone → server | `{roomId}`, ack `{success, error?}` (Start alone) |
-| `player:solo:stop` | phone → server | `{roomId}`, ack `{success, error?}` (Stop training) |
+| `player:solo` | phone → server | `{roomId}`, ack `{success, error?}` (sent right after joining a `?train=1` room) |
+| `player:solo:stop` | phone → server | `{roomId}`, ack `{success, error?}` (Quit training: saves the session, deletes the room) |
 | `room:update` | server → room | `{id, state, mode, players[{color,name,socketId,rematchReady,fightReady}], playerCount, maxPlayers, spellRevealedAt, startedAt, game: GameInfo}`. `mode` is null while waiting. |
 | `countdown` | server → room | `{seconds}` |
 | `fight` | server → room | `{text:'FIGHT'}` |

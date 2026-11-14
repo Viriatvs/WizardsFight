@@ -1,11 +1,13 @@
 'use client';
 
+import type { PlayerColor } from '@/types/game';
+
 interface BattleImageProps {
-  blueJoined: boolean;
-  redJoined: boolean;
+  /** Wizard names per team, in join order. */
+  blueNames: string[];
+  redNames: string[];
   countdown: number | null;
   battleStarted: boolean;
-  firstJoinColor?: 'blue' | 'red' | null;
 }
 
 function getSceneImage(blueJoined: boolean, redJoined: boolean): string {
@@ -15,7 +17,40 @@ function getSceneImage(blueJoined: boolean, redJoined: boolean): string {
   return '/images/battlefield-waiting.png';
 }
 
-export default function BattleImage({ blueJoined, redJoined, countdown, battleStarted }: BattleImageProps) {
+/**
+ * Where each team's names sit: just above its wizard's hat, as % of the picture.
+ * All three scene pictures put the wizards in the same place; update these if a picture changes.
+ */
+const NAME_ANCHOR: Record<PlayerColor, { left: string; bottom: string; text: string }> = {
+  blue: { left: '24%', bottom: '83%', text: 'text-blue-300' },
+  red: { left: '71.5%', bottom: '75.5%', text: 'text-red-300' },
+};
+
+function TeamNames({ color, names }: { color: PlayerColor; names: string[] }) {
+  if (names.length === 0) return null;
+  const a = NAME_ANCHOR[color];
+  return (
+    <ul
+      aria-label={`${color === 'blue' ? 'Blue' : 'Red'} team`}
+      className="absolute -translate-x-1/2 flex flex-col items-center gap-0.5 pointer-events-none"
+      style={{ left: a.left, bottom: a.bottom }}
+    >
+      {names.map((name, i) => (
+        <li
+          key={i}
+          className={`font-pixel ${a.text} text-xs md:text-base lg:text-lg leading-tight whitespace-nowrap bg-black/60 px-2 py-0.5`}
+          style={{ textShadow: '2px 2px 0 #000' }}
+        >
+          {name}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+export default function BattleImage({ blueNames, redNames, countdown, battleStarted }: BattleImageProps) {
+  const blueJoined = blueNames.length > 0;
+  const redJoined = redNames.length > 0;
   const bothJoined = blueJoined && redJoined;
   const imageSrc = getSceneImage(blueJoined, redJoined);
 
@@ -27,6 +62,9 @@ export default function BattleImage({ blueJoined, redJoined, countdown, battleSt
         className="w-full h-auto block"
       />
 
+      <TeamNames color="blue" names={blueNames} />
+      <TeamNames color="red" names={redNames} />
+
       {!blueJoined && !redJoined && (
         <div className="absolute inset-0 flex items-center justify-center">
           <div className="bg-black/60 backdrop-blur-sm px-8 py-4 rounded-2xl border border-amber-500/30">
@@ -37,10 +75,11 @@ export default function BattleImage({ blueJoined, redJoined, countdown, battleSt
         </div>
       )}
 
+      {/* Status banners sit at the bottom, on the empty floor, so they never cover the names. */}
       {(blueJoined || redJoined) && !bothJoined && (
-        <div className="absolute top-4 left-1/2 -translate-x-1/2">
+        <div className="absolute bottom-4 left-1/2 -translate-x-1/2">
           <div className="bg-black/60 backdrop-blur-sm px-6 py-3 rounded-2xl border border-amber-500/30">
-            <span className="text-amber-400 text-lg font-bold uppercase tracking-wider animate-pulse">
+            <span className="text-amber-400 text-lg font-bold uppercase tracking-wider animate-pulse whitespace-nowrap">
               Waiting for the other team…
             </span>
           </div>
@@ -62,9 +101,9 @@ export default function BattleImage({ blueJoined, redJoined, countdown, battleSt
       )}
 
       {countdown === null && bothJoined && !battleStarted && (
-        <div className="absolute top-4 left-1/2 -translate-x-1/2">
+        <div className="absolute bottom-4 left-1/2 -translate-x-1/2">
           <div className="bg-black/70 backdrop-blur-sm px-8 py-3 rounded-2xl border border-amber-500/50">
-            <span className="text-amber-300 text-xl font-bold uppercase tracking-wider animate-pulse">
+            <span className="text-amber-300 text-xl font-bold uppercase tracking-wider animate-pulse whitespace-nowrap">
               Both Teams Here — Press Let&apos;s Fight!
             </span>
           </div>

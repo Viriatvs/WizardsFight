@@ -1,6 +1,6 @@
 'use client';
 
-import { trainingSummary, formatSeconds, TRAINING_ROUNDS } from '@/lib/game';
+import { trainingSummary, formatSeconds } from '@/lib/game';
 import type { RoundResults } from '@/types/game';
 
 interface TrainingSummaryProps {
@@ -10,11 +10,14 @@ interface TrainingSummaryProps {
   large?: boolean;
 }
 
-/** Training alone: played / solved / failed / best time, plus one chip per round. */
+/** Rounds shown as chips; training has no limit, so only the latest ones. */
+const SHOWN_ROUNDS = 10;
+
+/** Training alone: played / solved / failed / best time, plus a chip for each of the latest rounds. */
 export default function TrainingSummary({ results, times, large }: TrainingSummaryProps) {
   const s = trainingSummary(results, times);
   const stats: Array<[string, string, string]> = [
-    ['Played', `${s.played} / ${TRAINING_ROUNDS}`, 'text-gray-100'],
+    ['Played', String(s.played), 'text-gray-100'],
     ['Solved', String(s.solved), 'text-emerald-400'],
     ['Failed', String(s.failed), 'text-red-400'],
     ['Best time', s.best !== null ? formatSeconds(s.best) : '—', 'text-amber-300'],
@@ -33,7 +36,7 @@ export default function TrainingSummary({ results, times, large }: TrainingSumma
 
       {results.length > 0 && (
         <ol className="mt-4 flex flex-wrap justify-center gap-2" aria-label="Round results">
-          {results.map((r, i) => (
+          {results.map((r, i) => i < results.length - SHOWN_ROUNDS ? null : (
             <li
               key={i}
               className={`px-3 py-1 border-2 text-sm font-bold ${r ? 'border-emerald-500 text-emerald-300' : 'border-red-500/70 text-red-300'}`}

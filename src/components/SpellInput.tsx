@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useRef, useCallback, useEffect } from 'react';
+import PixelIcon from '@/components/PixelIcon';
 
 interface SpellInputProps {
   category: string;
@@ -97,7 +98,7 @@ export default function SpellInput({
     return (
       <div className="flex flex-col items-center gap-4 py-8">
         <div className="text-5xl font-bold text-emerald-400 animate-bounce">✓ CORRECT</div>
-        <div className="text-gray-400 font-mono text-lg">⚡ {submitted.durationMs.toLocaleString()} ms</div>
+        <div className="text-gray-400 font-mono text-lg"><PixelIcon name="bolt" /> {submitted.durationMs.toLocaleString()} ms</div>
         {graceSeconds !== undefined && graceSeconds !== null && graceSeconds > 0 && (
           <div className="mt-4 text-center">
             <div className="text-amber-400 text-3xl font-bold animate-pulse">{graceSeconds}</div>
@@ -116,7 +117,7 @@ export default function SpellInput({
       <div className="flex items-center gap-4 text-gray-400 font-mono">
         <span className="text-2xl font-bold text-amber-300">{(displayTime / 1000).toFixed(2)}s</span>
         {secondsLeft !== null && (
-          <span className={`text-sm ${secondsLeft <= 3 ? 'text-red-400 font-bold' : 'text-gray-400'}`}>⏳ {secondsLeft}s left</span>
+          <span className={`text-sm ${secondsLeft <= 3 ? 'text-red-400 font-bold' : 'text-gray-400'}`}><PixelIcon name="hourglass" /> {secondsLeft}s left</span>
         )}
         {wrongAttempts > 0 && (
           <span className="text-red-400 text-sm">✗ {wrongAttempts} wrong</span>

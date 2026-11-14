@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import RpsIcon, { RPS_NAMES } from '@/components/RpsIcon';
 import { RPS_HANDS } from '@/lib/modes';
 import type { PlayerColor, RpsHand, RpsResult, RpsSide } from '@/types/game';
+import PixelIcon from '@/components/PixelIcon';
 
 interface RpsInputProps {
   myColor: PlayerColor | null;
@@ -88,7 +89,7 @@ export default function RpsInput({ myColor, training, teamMode, winsNeeded, curr
       ) : (
         <>
           {secondsLeft !== null && !myPick && (
-            <div className={`font-mono text-lg ${secondsLeft <= 1 ? 'text-red-400 font-bold' : 'text-gray-400'}`}>⏳ {secondsLeft}s to pick</div>
+            <div className={`font-mono text-lg ${secondsLeft <= 1 ? 'text-red-400 font-bold' : 'text-gray-400'}`}><PixelIcon name="hourglass" /> {secondsLeft}s to pick</div>
           )}
           <div className="grid grid-cols-3 gap-3 w-full" role="group" aria-label="Pick rock, paper or scissors">
             {RPS_HANDS.map((hand) => (

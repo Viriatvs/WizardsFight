@@ -2,6 +2,7 @@
 
 import { MAX_TEAM_SIZE } from '@/lib/teams';
 import type { PlayerColor } from '@/types/game';
+import PixelIcon from '@/components/PixelIcon';
 
 interface PlayerCardProps {
   color: PlayerColor;
@@ -24,7 +25,7 @@ const colorConfig = {
     text: 'text-blue-400',
     bg: 'bg-blue-500/10',
     dot: 'bg-blue-500',
-    emoji: '🧙‍♂️',
+    icon: 'wizardBlue' as const,
   },
   red: {
     label: 'RED TEAM',
@@ -33,7 +34,7 @@ const colorConfig = {
     text: 'text-red-400',
     bg: 'bg-red-500/10',
     dot: 'bg-red-500',
-    emoji: '🧙‍♀️',
+    icon: 'wizardRed' as const,
   },
 };
 
@@ -46,7 +47,7 @@ export default function PlayerCard({ color, members, connected, result, isWinner
       <div className="flex flex-col items-center justify-center gap-2 p-6 border-4 border-dashed border-gray-600 bg-gray-950/60 opacity-60 hover:opacity-100 transition-opacity">
         {joinUrl ? (
           <a href={joinUrl} target="_blank" rel="noopener noreferrer" className="flex flex-col items-center gap-3 cursor-pointer">
-            <span className={`text-5xl ${c.text}`}>{c.emoji}</span>
+            <span className={`text-5xl ${c.text}`}><PixelIcon name={c.icon} /></span>
             <span className="text-gray-400 text-sm uppercase tracking-wider">{c.label}</span>
             <span className="text-gray-500 text-xs">Click to open wizard tab</span>
           </a>
@@ -64,7 +65,7 @@ export default function PlayerCard({ color, members, connected, result, isWinner
   return (
     <div className={`flex flex-col items-center gap-2 p-6 border-4 ${c.border} ${c.bg} ${c.glow} ${isWinner ? 'scale-105' : ''} transition-all`}>
       {wins !== undefined && wins > 0 && (
-        <div className={`text-3xl font-black ${c.text}`}>🏆 {wins}</div>
+        <div className={`text-3xl font-black ${c.text}`}><PixelIcon name="trophy" /> {wins}</div>
       )}
       <div className="flex items-center gap-2">
         <div className={`w-3 h-3 rounded-full ${c.dot} ${connected ? 'animate-pulse' : 'opacity-30'}`} />

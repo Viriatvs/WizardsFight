@@ -4,12 +4,14 @@ import { useState, useCallback, useEffect } from 'react';
 import Link from 'next/link';
 import { io, Socket } from 'socket.io-client';
 import FightTicker from '@/components/FightTicker';
+import PixelIcon from '@/components/PixelIcon';
 
 /** Looks like plain art (no pointer), but is a real link so keyboards can reach it too. */
 const EASTER_EGG = 'text-4xl sm:text-5xl cursor-default focus:outline-none focus-visible:ring-4 focus-visible:ring-amber-400';
 
 export default function LandingPage() {
-  const [loading, setLoading] = useState(false);
+  /** Which button is creating its room. */
+  const [loading, setLoading] = useState<'fight' | 'train' | null>(null);
   // Set when a battle/play page redirected here because its room no longer exists.
   const [expired, setExpired] = useState(false);
 
@@ -17,19 +19,23 @@ export default function LandingPage() {
     setExpired(new URLSearchParams(window.location.search).has('expired'));
   }, []);
 
-  const startFight = useCallback(() => {
-    setLoading(true);
+  /**
+   * Start Fight opens the main screen of a new room. Train alone uses a private room too, but goes straight
+   * to the phone page, which starts training after the name: no main screen or QR code needed.
+   */
+  const createRoom = useCallback((kind: 'fight' | 'train') => {
+    setLoading(kind);
     const socket: Socket = io({ path: '/socket.io' });
 
     socket.on('connect', () => {
       socket.emit('room:create', (result: { roomId: string }) => {
         socket.disconnect();
-        window.location.href = `/battle/${result.roomId}`;
+        window.location.href = kind === 'fight' ? `/battle/${result.roomId}` : `/play/${result.roomId}?train=1`;
       });
     });
 
     socket.on('connect_error', () => {
-      setLoading(false);
+      setLoading(null);
     });
   }, []);
 
@@ -39,9 +45,9 @@ export default function LandingPage() {
         <div className="flex flex-col items-center mb-6">
           <div className="flex items-center justify-center gap-2 mb-3">
             {/* Easter egg: the wizards open the hidden Fight History page. */}
-            <Link href="/history" aria-label="Fight history" className={EASTER_EGG}>🧙‍♂️</Link>
-            <span className="text-2xl sm:text-3xl text-red-500 animate-pulse" aria-hidden="true">⚔️</span>
-            <Link href="/history" aria-label="Fight history" className={EASTER_EGG}>🧙‍♀️</Link>
+            <Link href="/history" aria-label="Fight history" className={EASTER_EGG}><PixelIcon name="wizardBlue" /></Link>
+            <span className="text-2xl sm:text-3xl text-red-500 animate-pulse" aria-hidden="true"><PixelIcon name="swords" /></span>
+            <Link href="/history" aria-label="Fight history" className={EASTER_EGG}><PixelIcon name="wizardRed" /></Link>
           </div>
 
           <h1
@@ -64,9 +70,9 @@ export default function LandingPage() {
             One spell. Two wizards. Fastest correct incantation wins.
           </p>
           <div className="text-gray-400 text-sm mt-3 space-y-1">
-            <p>📱 Both players use their phones to cast</p>
-            <p>🖥️ One screen hosts the battle</p>
-            <p>🌍 Spells in <em className="text-amber-300">Latin</em></p>
+            <p><PixelIcon name="phone" /> Both players use their phones to cast</p>
+            <p><PixelIcon name="screen" /> One screen hosts the battle</p>
+            <p><PixelIcon name="globe" /> Spells in <em className="text-amber-300">Latin</em></p>
           </div>
         </div>
 
@@ -77,17 +83,28 @@ export default function LandingPage() {
         )}
 
         <button
-          onClick={startFight}
-          disabled={loading}
+          onClick={() => createRoom('fight')}
+          disabled={loading !== null}
           className="btn-pixel w-full max-w-xs py-4 text-xl sm:text-2xl disabled:cursor-wait"
         >
-          {loading ? 'Creating battle…' : '⚔️ Start Fight'}
+          {loading === 'fight' ? 'Creating battle…' : <><PixelIcon name="swords" /> Start Fight</>}
         </button>
+
+        <div className="mt-6">
+          <button
+            onClick={() => createRoom('train')}
+            disabled={loading !== null}
+            className="btn-pixel-secondary w-full max-w-xs py-3 text-lg disabled:cursor-wait"
+          >
+            {loading === 'train' ? 'Preparing training…' : <><PixelIcon name="wizardBlue" /> Train alone</>}
+          </button>
+          <p className="text-gray-400 text-sm mt-3">On your phone, no main screen needed. Play as many rounds as you like.</p>
+        </div>
 
         <FightTicker />
 
         <div className="mt-10 flex flex-wrap items-center justify-center gap-x-4 gap-y-2 sm:gap-8 text-gray-500 text-xs sm:text-sm px-4 font-pixel uppercase tracking-wider">
-          <span>2 Players Max</span>
+          <span>Up to 8 Wizards</span>
           <span className="hidden sm:inline">•</span>
           <span>Real-time WebSocket</span>
           <span className="hidden sm:inline">•</span>

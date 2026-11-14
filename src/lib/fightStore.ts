@@ -2,11 +2,16 @@
 // ponytail: a JSON file on the server; on Render's free plan it's wiped on redeploy/restart. Move to a database to keep history for good.
 import fs from 'fs';
 import path from 'path';
-import type { FightRecord } from '@/lib/fights';
+import { isSameDay, type FightRecord } from '@/lib/fights';
 
 export const FIGHTS_FILE = path.join(process.cwd(), 'data', 'fights.json');
 /** Oldest fights beyond this are dropped so the file stays small. */
 export const MAX_FIGHTS = 1000;
+
+/** Today's fights, newest first: the history only covers the current day. */
+export function readTodaysFights(file: string = FIGHTS_FILE, now: Date = new Date()): FightRecord[] {
+  return readFights(file).filter((f) => isSameDay(f.at, now));
+}
 
 /** All saved fights, newest first. A missing file means no fights yet; a broken file is set aside, not lost. */
 export function readFights(file: string = FIGHTS_FILE): FightRecord[] {
@@ -29,10 +34,13 @@ export function readFights(file: string = FIGHTS_FILE): FightRecord[] {
   }
 }
 
-/** Adds a fight at the top and saves. Written to a temp file first, then renamed, so a crash can't leave half a file. */
+/**
+ * Adds a fight at the top and saves, dropping fights from earlier days.
+ * Written to a temp file first, then renamed, so a crash can't leave half a file.
+ */
 export function saveFight(fight: FightRecord, file: string = FIGHTS_FILE): void {
   try {
-    const fights = [fight, ...readFights(file)].slice(0, MAX_FIGHTS);
+    const fights = [fight, ...readTodaysFights(file, new Date(fight.at))].slice(0, MAX_FIGHTS);
     fs.mkdirSync(path.dirname(file), { recursive: true });
     const tmp = `${file}.tmp`;
     fs.writeFileSync(tmp, JSON.stringify(fights, null, 1));

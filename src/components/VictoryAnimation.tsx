@@ -1,6 +1,7 @@
 'use client';
 
 import type { PlayerColor } from '@/types/game';
+import PixelIcon from '@/components/PixelIcon';
 
 interface VictoryAnimationProps {
   winnerColor: PlayerColor | null;
@@ -57,7 +58,7 @@ export default function VictoryAnimation({ winnerColor, winnerName, title, subti
           </div>
           {subtitle && <div className="text-gray-100 text-2xl md:text-3xl font-bold mt-4 drop-shadow-lg">{subtitle}</div>}
           {durationMs !== null && (
-            <div className="text-gray-200 font-mono mt-3 text-lg drop-shadow-md">⚡ {durationMs.toLocaleString()} ms</div>
+            <div className="text-gray-200 font-mono mt-3 text-lg drop-shadow-md"><PixelIcon name="bolt" /> {durationMs.toLocaleString()} ms</div>
           )}
           <div className="mt-6 flex gap-2 justify-center">
             {Array.from({ length: 20 }).map((_, i) => (

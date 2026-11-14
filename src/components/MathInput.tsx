@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import type { MathQuestion } from '@/types/game';
+import PixelIcon from '@/components/PixelIcon';
 
 interface MathInputProps {
   question: MathQuestion;
@@ -41,13 +42,13 @@ export default function MathInput({ question, index, right, lastCorrect, deadlin
       <div className="flex w-full justify-between font-mono text-lg">
         <span className="text-emerald-400 font-bold" aria-live="polite">✓ {right} right</span>
         {secondsLeft !== null && (
-          <span className={secondsLeft <= HURRY_SECONDS ? 'text-red-400 font-bold' : 'text-gray-400'}>⏳ {secondsLeft}s</span>
+          <span className={secondsLeft <= HURRY_SECONDS ? 'text-red-400 font-bold' : 'text-gray-400'}><PixelIcon name="hourglass" /> {secondsLeft}s</span>
         )}
       </div>
 
       <div className="panel-stone text-center w-full px-4 py-6">
         <div className="font-pixel text-xs text-gray-400 uppercase tracking-widest mb-3">Question {index + 1}</div>
-        <p className="text-4xl md:text-5xl font-black text-amber-300 spell-glow tabular-nums">
+        <p className="font-digits text-3xl md:text-4xl leading-tight text-amber-300 spell-glow">
           {question.a} × {question.b}
         </p>
       </div>
@@ -58,7 +59,7 @@ export default function MathInput({ question, index, right, lastCorrect, deadlin
             key={`${index}-${option}`}
             onClick={() => pick(option)}
             disabled={waiting}
-            className="min-h-[56px] px-4 py-3 text-2xl font-bold tabular-nums border-4 transition-colors border-gray-600 bg-stone-dark/80 text-gray-100
+            className="min-h-[56px] px-4 py-3 font-digits text-xl border-4 transition-colors border-gray-600 bg-stone-dark/80 text-gray-100
               hover:border-amber-500 hover:bg-amber-500/10 disabled:opacity-50 disabled:cursor-not-allowed
               focus:outline-none focus-visible:ring-4 focus-visible:ring-amber-400"
           >
