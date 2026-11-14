@@ -58,12 +58,14 @@ export function drawReason(end: Pick<BattleEnd, 'allWrong' | 'mode' | 'results'>
     if (end.mode === 'math') return `Fewer than ${MATH_TRAINING_TARGET} right answers`;
     if (end.mode === 'potion') return `Fewer than ${POTION_TRAINING_TARGET} potions brewed`;
     if (end.mode === 'rune') return 'The computer wizard was faster';
+    if (end.mode === 'cauldron') return 'Fewer than 2 waves counted within 1 bat';
     return 'Time ran out';
   }
   if (end.allWrong) return 'Every wizard chose wrong';
   if (end.mode === 'puzzle') return 'Nobody finished the puzzle in time';
   if (end.mode === 'rps') return 'Nobody picked in time';
   if (end.mode === 'rune') return 'Same number of runes caught';
+  if (end.mode === 'cauldron') return 'Same number of waves won';
   const results = Object.values(end.results);
   if (end.mode === 'math') return `Same number of right answers (${formatAverage(teamAverages(results, (r) => r.rightAnswers ?? 0).blue)})`;
   if (end.mode === 'potion') {

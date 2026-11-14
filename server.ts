@@ -11,10 +11,11 @@ import {
   mathQuestion, MATH_TRAINING_TARGET, majorityHand,
   potionSequence, potionLength, potionDecided, POTION_MAX_LEVEL, POTION_TRAINING_TARGET,
   runeLayout, randomRune, runeRoundWinner, RUNE_FLASHES, RUNE_WINS_NEEDED,
+  cauldronWave, cauldronWaveWinner, firstToWinner, CAULDRON_WAVES, CAULDRON_WINS_NEEDED, CAULDRON_MAX_ANSWER, CAULDRON_TRAINING_MARGIN,
 } from './src/lib/modes';
 import { TEAMS, MAX_TEAM_SIZE, pickTeam, bothTeamsPresent, teamNames, teamSizes, teamAverages, higherTeam } from './src/lib/teams';
 import { gameScore, gameWinner, isGameOver } from './src/lib/game';
-import type { Room, Player, PlayerColor, SpellReveal, GameInfo, BattleEnd, RpsHand, RpsResult, RpsSide, MathNext, PotionStatus, RuneResult } from './src/types/game';
+import type { Room, Player, PlayerColor, SpellReveal, GameInfo, BattleEnd, RpsHand, RpsResult, RpsSide, MathNext, PotionStatus, RuneResult, CauldronResult } from './src/types/game';
 
 const dev = process.env.NODE_ENV !== 'production';
 const port = parseInt(process.env.PORT || '3000', 10);
@@ -47,6 +48,10 @@ const RUNE_SHOW_MS = 1500;
 /** Training: the computer wizard's reaction time. */
 const RUNE_CPU_MIN_MS = 650;
 const RUNE_CPU_MAX_MS = 1100;
+/** Cauldron Count: how long the creatures fly, time to answer, and how long the result shows. */
+const CAULDRON_FLIGHT_MS = 5000;
+const CAULDRON_ANSWER_MS = 8000;
+const CAULDRON_SHOW_MS = 3000;
 const ROOM_ABANDONED_MS = 5 * 60 * 1000;
 const ROOM_SWEEP_INTERVAL_MS = 60 * 1000;
 
@@ -207,6 +212,7 @@ function checkRoundComplete(io: Server, room: Room) {
   if (room.mode === 'rps' && room.rps.open && everyone(room, room.rps.picks)) resolveRpsThrow(io, room);
   if (room.mode === 'potion' && room.potion.open && potionLevelFinished(room)) closePotionLevel(io, room);
   if (room.mode === 'rune' && room.rune.open && everyone(room, room.rune.out)) resolveRuneFlash(io, room, null, null);
+  if (room.mode === 'cauldron' && room.cauldron.open && everyone(room, room.cauldron.guesses)) resolveCauldronWave(io, room);
 }
 
 const PRE_BATTLE_DELAY_MS = 2000;
@@ -460,6 +466,60 @@ function resolveRuneFlash(io: Server, room: Room, side: RpsSide | null, by: Play
   });
 }
 
+/** Cauldron Count: a new wave flies across every screen; answers open once it's gone. */
+function startCauldronWave(io: Server, room: Room) {
+  const cauldron = room.cauldron;
+  cauldron.wave++;
+  cauldron.open = false;
+  cauldron.guesses.clear();
+  const { bats, flyers } = cauldronWave(cauldron.wave, CAULDRON_FLIGHT_MS);
+  cauldron.bats = bats;
+  const wave = cauldron.wave;
+  io.to(room.id).emit('cauldron:wave', { wave, flyers, flightMs: CAULDRON_FLIGHT_MS });
+  laterInRound(room, CAULDRON_FLIGHT_MS, () => {
+    if (cauldron.wave !== wave) return;
+    cauldron.open = true;
+    io.to(room.id).emit('cauldron:ask', { wave, limitMs: CAULDRON_ANSWER_MS, max: CAULDRON_MAX_ANSWER });
+    laterInRound(room, CAULDRON_ANSWER_MS, () => { if (cauldron.wave === wave && cauldron.open) resolveCauldronWave(io, room); });
+  });
+}
+
+/** Everyone answered (or time is up): reveal the count and every guess, then the next wave or the round result. */
+function resolveCauldronWave(io: Server, room: Room) {
+  const cauldron = room.cauldron;
+  if (!cauldron.open) return;
+  cauldron.open = false;
+  const players = Array.from(room.players.values());
+  const guessOf = (p: Player) => cauldron.guesses.get(p.socketId) ?? null;
+  let winner: RpsSide | null;
+  if (room.solo) {
+    // Training: a hit (within the margin) for the wizard, a miss counts for the "cpu" side.
+    const guess = players[0] ? guessOf(players[0]) : null;
+    winner = guess !== null && Math.abs(guess - cauldron.bats) <= CAULDRON_TRAINING_MARGIN ? players[0].color : CPU;
+  } else {
+    winner = cauldronWaveWinner(players.map((p) => ({ color: p.color, guess: guessOf(p) })), cauldron.bats);
+  }
+  if (winner) cauldron.wins.set(winner, (cauldron.wins.get(winner) ?? 0) + 1);
+  const sides: RpsSide[] = room.solo ? [...players.map((p) => p.color), CPU] : TEAMS;
+  const wins = Object.fromEntries(sides.map((s) => [s, cauldron.wins.get(s) ?? 0]));
+  const result: CauldronResult = {
+    wave: cauldron.wave,
+    bats: cauldron.bats,
+    guesses: Object.fromEntries(players.map((p) => [p.socketId, { name: p.name, color: p.color, guess: guessOf(p) }])),
+    winner,
+    wins,
+  };
+  io.to(room.id).emit('cauldron:result', result);
+  const roundWinner = firstToWinner(wins, cauldron.wave, CAULDRON_WINS_NEEDED, CAULDRON_WAVES);
+  laterInRound(room, CAULDRON_SHOW_MS, () => {
+    if (roundWinner === undefined) return startCauldronWave(io, room);
+    const player = roundWinner && roundWinner !== CPU ? players.find((p) => p.color === roundWinner) ?? null : null;
+    // No win time: counting isn't a race, so the result screens show no time.
+    if (!player) return endBattle(io, room, null, { timedOut: true });
+    endBattle(io, room, player, room.solo ? {} : { teamWin: true });
+  });
+}
+
 function revealSpell(io: Server, room: Room) {
   const spell = room.spell;
   const revealedAt = room.spellRevealedAt!;
@@ -504,6 +564,12 @@ function revealSpell(io: Server, room: Room) {
       room.rune = { flash: 0, target: 0, layout: [], open: false, out: new Set(), wins: new Map() };
       emit({ mode: 'rune', winsNeeded: RUNE_WINS_NEEDED, flashes: RUNE_FLASHES, revealedAt });
       startRuneFlash(io, room);
+      return;
+    }
+    case 'cauldron': {
+      room.cauldron = { wave: 0, bats: 0, open: false, guesses: new Map(), wins: new Map() };
+      emit({ mode: 'cauldron', winsNeeded: CAULDRON_WINS_NEEDED, waves: CAULDRON_WAVES, revealedAt });
+      startCauldronWave(io, room);
       return;
     }
     case 'rps': {
@@ -761,6 +827,18 @@ app.prepare().then(() => {
         rune.out.add(socket.id);
         io.to(socket.id).emit('rune:wrong', { flash });
         if (everyone(room, rune.out)) resolveRuneFlash(io, room, null, null);
+        return;
+      }
+
+      // Cauldron Count: text is the counted bats (1…20); one answer per wave.
+      if (room.mode === 'cauldron') {
+        const cauldron = room.cauldron;
+        const guess = Number(payload.text);
+        if (!cauldron.open || cauldron.guesses.has(socket.id) || !Number.isInteger(guess) || guess < 1 || guess > CAULDRON_MAX_ANSWER) return;
+        cauldron.guesses.set(socket.id, guess);
+        // Who answered (never what), so screens can show "✓ Merlin".
+        io.to(room.id).emit('cauldron:answered', { socketIds: Array.from(cauldron.guesses.keys()) });
+        if (everyone(room, cauldron.guesses)) resolveCauldronWave(io, room);
         return;
       }
 

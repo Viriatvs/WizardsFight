@@ -1,8 +1,8 @@
 // Pure helpers for battle modes. Shared by server and client: no Node or browser APIs here.
-import type { BattleMode, MathQuestion, PlayerColor, RpsHand, RpsSide, SpellData } from '@/types/game';
+import type { BattleMode, Flyer, MathQuestion, PlayerColor, RpsHand, RpsSide, SpellData } from '@/types/game';
 import { TEAMS, otherTeam, teamAverages } from './teams';
 
-export const MODES: BattleMode[] = ['type', 'translate', 'describe', 'memorize', 'puzzle', 'rps', 'math', 'potion', 'rune'];
+export const MODES: BattleMode[] = ['type', 'translate', 'describe', 'memorize', 'puzzle', 'rps', 'math', 'potion', 'rune', 'cauldron'];
 
 export const MODE_LABELS: Record<BattleMode, string> = {
   type: 'Speed Cast',
@@ -14,6 +14,7 @@ export const MODE_LABELS: Record<BattleMode, string> = {
   math: 'Math Is Magic',
   potion: 'Potion Mixing',
   rune: 'Rune Reflex',
+  cauldron: 'Cauldron Count',
 };
 
 /** Puzzle mode: a 3 x 4 = 12-tile grid. */
@@ -203,11 +204,53 @@ export function randomRune(previous: number | null, rand: Rand = Math.random): n
 /**
  * After a flash: the side that won the round, null for a draw (all flashes played, level), or undefined to keep going.
  */
-export function runeRoundWinner(wins: Partial<Record<RpsSide, number>>, flashesPlayed: number): RpsSide | null | undefined {
+export const runeRoundWinner = (wins: Partial<Record<RpsSide, number>>, flashesPlayed: number) =>
+  firstToWinner(wins, flashesPlayed, RUNE_WINS_NEEDED, RUNE_FLASHES);
+
+/**
+ * "First to `needed` out of `total`" rounds-within-a-round: the side that got there, after `total` the side
+ * with more (null if level), or undefined to keep going.
+ */
+export function firstToWinner(wins: Partial<Record<RpsSide, number>>, played: number, needed: number, total: number): RpsSide | null | undefined {
   const sides = Object.entries(wins) as Array<[RpsSide, number]>;
-  const leader = sides.find(([, n]) => n >= RUNE_WINS_NEEDED);
+  const leader = sides.find(([, n]) => n >= needed);
   if (leader) return leader[0];
-  if (flashesPlayed < RUNE_FLASHES) return undefined;
+  if (played < total) return undefined;
   const [a, b] = sides.sort((x, y) => y[1] - x[1]);
   return !b || a[1] > b[1] ? a?.[0] ?? null : null;
+}
+
+/** Cauldron Count: 3 waves of bats (ghost decoys from wave 2); the closest guess wins a wave; first to 2 waves. */
+export const CAULDRON_WAVES = 3;
+export const CAULDRON_WINS_NEEDED = 2;
+export const CAULDRON_BATS = { min: 5, max: 14 } as const;
+export const CAULDRON_GHOSTS = { min: 2, max: 4 } as const;
+export const CAULDRON_GHOSTS_FROM_WAVE = 2;
+/** Answers are 1…20 on the phone. */
+export const CAULDRON_MAX_ANSWER = 20;
+/** Training: a wave counts as a hit within this many bats. */
+export const CAULDRON_TRAINING_MARGIN = 1;
+/** How long one creature takes to cross, and the latest it may start, so all are gone by `flightMs`. */
+const CROSSING_MS = { min: 1600, max: 2600 } as const;
+
+const randInt = (min: number, max: number, rand: Rand) => min + Math.floor(rand() * (max - min + 1));
+
+/** One wave: the real bat count and every creature's flight (shared by every screen). Sorted by start time. */
+export function cauldronWave(wave: number, flightMs: number, rand: Rand = Math.random): { bats: number; flyers: Flyer[] } {
+  const bats = randInt(CAULDRON_BATS.min, CAULDRON_BATS.max, rand);
+  const ghosts = wave >= CAULDRON_GHOSTS_FROM_WAVE ? randInt(CAULDRON_GHOSTS.min, CAULDRON_GHOSTS.max, rand) : 0;
+  const flyer = (kind: Flyer['kind']): Flyer => {
+    const durationMs = randInt(CROSSING_MS.min, CROSSING_MS.max, rand);
+    return { kind, y: 0.05 + rand() * 0.75, delayMs: Math.floor(rand() * (flightMs - durationMs)), durationMs, fromLeft: rand() < 0.5 };
+  };
+  const flyers = [...Array.from({ length: bats }, () => flyer('bat')), ...Array.from({ length: ghosts }, () => flyer('ghost'))];
+  return { bats, flyers: flyers.sort((a, b) => a.delayMs - b.delayMs) };
+}
+
+/** A wave's winner: the team whose best (closest) guess is nearer the real count; equally close or no guesses → null. */
+export function cauldronWaveWinner(guesses: Array<{ color: PlayerColor; guess: number | null }>, bats: number): PlayerColor | null {
+  const best = (c: PlayerColor) => Math.min(...guesses.filter((g) => g.color === c && g.guess !== null).map((g) => Math.abs(g.guess! - bats)));
+  const [blue, red] = TEAMS.map(best);
+  if (blue === red) return null; // also both Infinity: nobody answered
+  return blue < red ? 'blue' : 'red';
 }

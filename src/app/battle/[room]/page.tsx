@@ -12,11 +12,12 @@ import CopyLinkButton from '@/components/CopyLinkButton';
 import { MODE_LABELS } from '@/lib/modes';
 import { roundLabel, drawReason, winDetail } from '@/lib/game';
 import { TEAMS, MAX_TEAM_SIZE, bothTeamsPresent, teamNames } from '@/lib/teams';
-import type { PlayerColor, BattleMode, BattleEnd, GameInfo, GameScore, PotionShow, PotionInput, PotionStatus, RuneFlash, RuneResult } from '@/types/game';
+import type { PlayerColor, BattleMode, BattleEnd, GameInfo, GameScore, PotionShow, PotionInput, PotionStatus, RuneFlash, RuneResult, CauldronWave, CauldronAsk, CauldronResult } from '@/types/game';
 import PixelIcon from '@/components/PixelIcon';
 import BattleMusic from '@/components/BattleMusic';
 import { PotionStage, type PotionLevel } from '@/components/Potion';
 import { RuneStage, type RuneFlashState } from '@/components/Rune';
+import { CauldronStage, type CauldronState } from '@/components/Cauldron';
 
 /** Where to send visitors of a room that no longer exists. The start page shows a notice for it. */
 const ROOM_EXPIRED_URL = '/?expired=1';
@@ -57,6 +58,7 @@ export default function BattlePage({ params }: { params: Promise<{ room: string 
   /** Potion Mixing / Rune Reflex: shown big instead of the battle picture while those rounds play. */
   const [potion, setPotion] = useState<PotionLevel | null>(null);
   const [rune, setRune] = useState<RuneFlashState | null>(null);
+  const [cauldron, setCauldron] = useState<CauldronState | null>(null);
   // Read after the first render: the server has no window, and the first browser render must match its HTML.
   const [origin, setOrigin] = useState('');
   useEffect(() => setOrigin(window.location.origin), []);
@@ -89,6 +91,7 @@ export default function BattlePage({ params }: { params: Promise<{ room: string 
         setFinalEnd(null);
         setPotion(null);
         setRune(null);
+        setCauldron(null);
       }
       // Game cancelled (a player left mid-game): back to the plain waiting room.
       if (data.state === 'waiting' && data.game.results.length === 0) setBattleEnd(null);
@@ -131,6 +134,12 @@ export default function BattlePage({ params }: { params: Promise<{ room: string 
     socket.on('rune:flash', (data: RuneFlash) => setRune((r) => r && { ...r, flash: data.flash, target: data.target, layout: data.layout, deadline: Date.now() + data.limitMs }));
     socket.on('rune:wrong', () => setRune((r) => r && { ...r, wrong: true }));
     socket.on('rune:result', (data: RuneResult) => setRune((r) => r && { ...r, result: data, wins: data.wins }));
+
+    // Cauldron Count: a wave flies by, answers open, who answered, then the count and every guess.
+    socket.on('cauldron:wave', (data: CauldronWave) => setCauldron((c) => ({ wave: data, ask: null, answered: [], result: null, wins: c?.wins ?? {} })));
+    socket.on('cauldron:ask', (data: CauldronAsk) => setCauldron((c) => (c && c.wave.wave === data.wave ? { ...c, ask: { deadline: Date.now() + data.limitMs, max: data.max } } : c)));
+    socket.on('cauldron:answered', (data: { socketIds: string[] }) => setCauldron((c) => c && { ...c, answered: data.socketIds }));
+    socket.on('cauldron:result', (data: CauldronResult) => setCauldron((c) => c && { ...c, result: data, wins: data.wins }));
 
     socket.on('player:disconnected', (data: { color: string; name: string }) => {
       setError(`${data.name} left the room`);
@@ -277,6 +286,8 @@ export default function BattlePage({ params }: { params: Promise<{ room: string 
             <PotionStage level={potion} />
           ) : room?.state === 'playing' && room.mode === 'rune' && rune ? (
             <RuneStage state={rune} />
+          ) : room?.state === 'playing' && room.mode === 'cauldron' && cauldron ? (
+            <CauldronStage state={cauldron} players={room.players} />
           ) : (
           <BattleImage
             blueNames={members('blue').map((p) => p.name)}

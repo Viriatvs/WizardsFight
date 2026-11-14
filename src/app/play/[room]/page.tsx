@@ -12,10 +12,11 @@ import RpsInput from '@/components/RpsInput';
 import MathInput from '@/components/MathInput';
 import { PotionInput as PotionPad, type PotionLevel } from '@/components/Potion';
 import { RuneInput, type RuneFlashState } from '@/components/Rune';
+import { CauldronInput, type CauldronState } from '@/components/Cauldron';
 import { MODE_LABELS, fillWords } from '@/lib/modes';
 import { roundLabel } from '@/lib/game';
 import { TEAMS, MAX_TEAM_SIZE, bothTeamsPresent, otherTeam, teamSizes } from '@/lib/teams';
-import type { PlayerColor, GamePhase, BattleMode, SpellReveal, GameInfo, BattleEnd, RpsThrow, RpsResult, MathQuestion, MathNext, PotionShow, PotionInput, PotionStatus, RuneFlash, RuneResult } from '@/types/game';
+import type { PlayerColor, GamePhase, BattleMode, SpellReveal, GameInfo, BattleEnd, RpsThrow, RpsResult, MathQuestion, MathNext, PotionShow, PotionInput, PotionStatus, RuneFlash, RuneResult, CauldronWave, CauldronAsk, CauldronResult } from '@/types/game';
 import PixelIcon, { WIZARD_ICON } from '@/components/PixelIcon';
 
 /** Where to send visitors of a room that no longer exists. The start page shows a notice for it. */
@@ -99,6 +100,7 @@ export default function PlayPage({ params }: { params: Promise<{ room: string }>
   const [math, setMath] = useState<{ question: MathQuestion; index: number; right: number; lastCorrect: boolean | null } | null>(null);
   const [potion, setPotion] = useState<PotionLevel | null>(null);
   const [rune, setRune] = useState<RuneFlashState | null>(null);
+  const [cauldron, setCauldron] = useState<CauldronState | null>(null);
   const [submitted, setSubmitted] = useState<{ correct: boolean; durationMs: number } | null>(null);
   const [graceSeconds, setGraceSeconds] = useState<number | null>(null);
   const graceTimerRef = useRef<ReturnType<typeof setInterval>>();
@@ -140,6 +142,7 @@ export default function PlayPage({ params }: { params: Promise<{ room: string }>
         setMath(null);
         setPotion(null);
         setRune(null);
+        setCauldron(null);
         setGraceSeconds(null);
         setBattleEnd(null);
         clearTimeout(answerTimerRef.current);
@@ -178,6 +181,7 @@ export default function PlayPage({ params }: { params: Promise<{ room: string }>
       setMath(data.mode === 'math' ? { question: data.question, index: 0, right: 0, lastCorrect: null } : null);
       setPotion(null);
       setRune(null);
+      setCauldron(null);
       setDeadline('limitMs' in data ? Date.now() + data.limitMs : null);
       setPhase('spell');
     });
@@ -207,6 +211,12 @@ export default function PlayPage({ params }: { params: Promise<{ room: string }>
     socket.on('rune:flash', (data: RuneFlash) => setRune((r) => r && { ...r, flash: data.flash, target: data.target, layout: data.layout, deadline: Date.now() + data.limitMs }));
     socket.on('rune:wrong', () => setRune((r) => r && { ...r, wrong: true }));
     socket.on('rune:result', (data: RuneResult) => setRune((r) => r && { ...r, result: data, wins: data.wins }));
+
+    // Cauldron Count: a wave flies by, answers open, who answered, then the count and every guess.
+    socket.on('cauldron:wave', (data: CauldronWave) => setCauldron((c) => ({ wave: data, ask: null, answered: [], result: null, wins: c?.wins ?? {} })));
+    socket.on('cauldron:ask', (data: CauldronAsk) => setCauldron((c) => (c && c.wave.wave === data.wave ? { ...c, ask: { deadline: Date.now() + data.limitMs, max: data.max } } : c)));
+    socket.on('cauldron:answered', (data: { socketIds: string[] }) => setCauldron((c) => c && { ...c, answered: data.socketIds }));
+    socket.on('cauldron:result', (data: CauldronResult) => setCauldron((c) => c && { ...c, result: data, wins: data.wins }));
 
     // Memorize: some typed words were right; only this player sees them.
     socket.on('spell:progress', (data: WordProgress) => setWordProgress(data));
@@ -499,6 +509,10 @@ export default function PlayPage({ params }: { params: Promise<{ room: string }>
 
         {phase === 'spell' && reveal?.mode === 'rune' && rune && (
           <RuneInput state={rune} myColor={color} winsNeeded={reveal.winsNeeded} onTap={(flash, r) => submitSpell(`${flash}:${r}`)} />
+        )}
+
+        {phase === 'spell' && reveal?.mode === 'cauldron' && cauldron && (
+          <CauldronInput key={cauldron.wave.wave} state={cauldron} myColor={color} training={!!game?.training} onAnswer={(n) => submitSpell(String(n))} />
         )}
 
         {phase === 'spell' && reveal?.mode === 'rps' && (

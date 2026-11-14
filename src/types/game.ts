@@ -1,6 +1,6 @@
 export type RoomState = 'waiting' | 'countdown' | 'playing' | 'ended';
 export type PlayerColor = 'blue' | 'red';
-export type BattleMode = 'type' | 'translate' | 'describe' | 'memorize' | 'puzzle' | 'rps' | 'math' | 'potion' | 'rune';
+export type BattleMode = 'type' | 'translate' | 'describe' | 'memorize' | 'puzzle' | 'rps' | 'math' | 'potion' | 'rune' | 'cauldron';
 export type RpsHand = 'rock' | 'paper' | 'scissors';
 /** Rock Paper Scissors / Rune Reflex side: a player's color, or the computer wizard in training. */
 export type RpsSide = PlayerColor | 'cpu';
@@ -70,7 +70,9 @@ export type SpellReveal =
   /** Levels follow as potion:show / potion:input / potion:status events. */
   | { mode: 'potion'; maxLevel: number; revealedAt: number }
   /** Flashes follow as rune:ready / rune:flash / rune:result events. */
-  | { mode: 'rune'; winsNeeded: number; flashes: number; revealedAt: number };
+  | { mode: 'rune'; winsNeeded: number; flashes: number; revealedAt: number }
+  /** Waves follow as cauldron:wave / cauldron:ask / cauldron:answered / cauldron:result events. */
+  | { mode: 'cauldron'; winsNeeded: number; waves: number; revealedAt: number };
 
 /** MathIsMagic question: a × b, with the product among the options. The answer itself is never sent. */
 export interface MathQuestion { a: number; b: number; options: number[] }
@@ -99,6 +101,21 @@ export interface PotionStatus { level: number; players: Record<string, { color: 
 /** rune:flash: tap `target` on the grid, laid out as `layout` (rune indices), within limitMs. */
 export interface RuneFlash { flash: number; target: number; layout: number[]; limitMs: number }
 /** rune:result: who caught the flash (null = nobody), by which wizard, and the flashes won so far. */
+/** One creature crossing the sky: y and the timing are shared, so every screen shows the same flight. */
+export interface Flyer { kind: 'bat' | 'ghost'; y: number; delayMs: number; durationMs: number; fromLeft: boolean }
+/** cauldron:wave: the creatures of this wave; they all cross within flightMs. */
+export interface CauldronWave { wave: number; flyers: Flyer[]; flightMs: number }
+/** cauldron:ask: tap a count from 1 to max within limitMs. */
+export interface CauldronAsk { wave: number; limitMs: number; max: number }
+/** cauldron:result: the real count, every guess, the wave's winner (null = nobody; 'cpu' = a training miss) and waves won so far. */
+export interface CauldronResult {
+  wave: number;
+  bats: number;
+  guesses: Record<string, { name: string; color: PlayerColor; guess: number | null }>;
+  winner: RpsSide | null;
+  wins: Partial<Record<RpsSide, number>>;
+}
+
 export interface RuneResult { flash: number; target: number; winner: RpsSide | null; by: string | null; wins: Partial<Record<RpsSide, number>> }
 
 export interface Player {
@@ -154,6 +171,8 @@ export interface Room {
   potion: { sequence: number[]; level: number; open: boolean; progress: Map<string, { pos: number; best: number; done: boolean; out: boolean }> };
   /** Rune Reflex: the current flash (target + grid), whether taps count, who tapped wrong this flash, flashes won per side. */
   rune: { flash: number; target: number; layout: number[]; open: boolean; out: Set<string>; wins: Map<string, number> };
+  /** Cauldron Count: the current wave's real bat count, whether answers count, each wizard's guess, waves won per side. */
+  cauldron: { wave: number; bats: number; open: boolean; guesses: Map<string, number>; wins: Map<string, number> };
   /** Last puzzle picture used in this room, so the next Puzzle round shows a different one. */
   puzzleImage: string | null;
 }

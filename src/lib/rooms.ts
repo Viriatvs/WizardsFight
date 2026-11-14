@@ -30,6 +30,7 @@ export function createRoom(hostSocketId: string): Room {
     rps: { throw: 0, open: false, picks: new Map(), wins: new Map(), idleThrows: 0 },
     potion: { sequence: [], level: 0, open: false, progress: new Map() },
     rune: { flash: 0, target: 0, layout: [], open: false, out: new Set(), wins: new Map() },
+    cauldron: { wave: 0, bats: 0, open: false, guesses: new Map(), wins: new Map() },
     foundWords: new Map(),
   };
   rooms.set(id, room);

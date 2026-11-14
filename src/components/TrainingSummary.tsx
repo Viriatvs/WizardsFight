@@ -41,7 +41,7 @@ export default function TrainingSummary({ results, times, large }: TrainingSumma
               key={i}
               className={`px-3 py-1 border-2 text-sm font-bold ${r ? 'border-emerald-500 text-emerald-300' : 'border-red-500/70 text-red-300'}`}
             >
-              R{i + 1}: {r && times[i] !== null ? formatSeconds(times[i]!) : 'Failed'}
+              R{i + 1}: {!r ? 'Failed' : times[i] !== null ? formatSeconds(times[i]!) : 'Solved'}
             </li>
           ))}
         </ol>

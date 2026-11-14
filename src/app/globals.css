@@ -228,6 +228,27 @@ h1, h2, h3, button, .font-black, .font-pixel {
   pointer-events: none;
 }
 
+/* Cauldron Count: creatures cross the sky. The flight is the game itself, so it keeps running with reduced motion. */
+@keyframes fly-right {
+  from { left: -14%; }
+  to { left: 104%; }
+}
+@keyframes fly-left {
+  from { left: 104%; }
+  to { left: -14%; }
+}
+/* Bat wings: two stacked frames, each visible half the time. */
+@keyframes flap-a {
+  0%, 49% { opacity: 1; }
+  50%, 100% { opacity: 0; }
+}
+@keyframes flap-b {
+  0%, 49% { opacity: 0; }
+  50%, 100% { opacity: 1; }
+}
+.flap-a { animation: flap-a 280ms steps(1) infinite; }
+.flap-b { animation: flap-b 280ms steps(1) infinite; }
+
 /* Respect "reduce motion": stop decorative loops; the countdown number shows without its zoom. */
 @media (prefers-reduced-motion: reduce) {
   .animate-bounce, .animate-pulse, .animate-spin, .animate-shake,
@@ -240,6 +261,9 @@ h1, h2, h3, button, .font-black, .font-pixel {
   .confetti-piece {
     display: none;
   }
+  /* Bats glide instead of flapping. */
+  .flap-a { animation: none; }
+  .flap-b { display: none; }
   .btn-pixel, .btn-pixel-secondary {
     transition: none;
   }

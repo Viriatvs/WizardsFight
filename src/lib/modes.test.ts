@@ -7,6 +7,7 @@ import {
   mathQuestion, MATH_FACTOR,
   potionSequence, potionLength, potionDecided, POTION_INGREDIENTS, POTION_MAX_LEVEL,
   runeLayout, randomRune, runeRoundWinner, RUNE_COUNT,
+  cauldronWave, cauldronWaveWinner, CAULDRON_BATS, CAULDRON_GHOSTS,
 } from './modes';
 import type { BattleMode, SpellData } from '@/types/game';
 
@@ -172,4 +173,30 @@ test('rune: layout has every rune once; target never repeats; first to 3 wins, e
   assert.equal(runeRoundWinner({ blue: 2, red: 1 }, 5), 'blue'); // a flash nobody caught
   assert.equal(runeRoundWinner({ blue: 2, red: 2 }, 5), null);
   assert.equal(runeRoundWinner({ blue: 0, cpu: 3 }, 3), 'cpu');
+});
+
+test('cauldron: waves have 5-14 bats, ghosts only from wave 2, and every flight ends in time', () => {
+  for (let run = 0; run < 50; run++) {
+    for (const wave of [1, 2, 3]) {
+      const { bats, flyers } = cauldronWave(wave, 5000);
+      const ghosts = flyers.filter((f) => f.kind === 'ghost').length;
+      assert.equal(flyers.filter((f) => f.kind === 'bat').length, bats);
+      assert.ok(bats >= CAULDRON_BATS.min && bats <= CAULDRON_BATS.max);
+      if (wave === 1) assert.equal(ghosts, 0);
+      else assert.ok(ghosts >= CAULDRON_GHOSTS.min && ghosts <= CAULDRON_GHOSTS.max);
+      for (const f of flyers) {
+        assert.ok(f.delayMs >= 0 && f.delayMs + f.durationMs <= 5000);
+        assert.ok(f.y >= 0 && f.y <= 1);
+      }
+    }
+  }
+});
+
+test('cauldron: the team with the closest guess wins the wave; equally close or no guesses is nobody', () => {
+  const g = (color: 'blue' | 'red', guess: number | null) => ({ color, guess });
+  assert.equal(cauldronWaveWinner([g('blue', 9), g('red', 12)], 10), 'blue');
+  assert.equal(cauldronWaveWinner([g('blue', 8), g('red', 12)], 10), null); // both 2 away
+  assert.equal(cauldronWaveWinner([g('blue', 3), g('blue', 11), g('red', 12)], 10), 'blue'); // best member counts
+  assert.equal(cauldronWaveWinner([g('blue', null), g('red', 20)], 10), 'red');
+  assert.equal(cauldronWaveWinner([g('blue', null), g('red', null)], 10), null);
 });
