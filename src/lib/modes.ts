@@ -1,7 +1,8 @@
 // Pure helpers for battle modes. Shared by server and client: no Node or browser APIs here.
-import type { BattleMode, MathQuestion, RpsHand, SpellData } from '@/types/game';
+import type { BattleMode, MathQuestion, PlayerColor, RpsHand, RpsSide, SpellData } from '@/types/game';
+import { TEAMS, otherTeam, teamAverages } from './teams';
 
-export const MODES: BattleMode[] = ['type', 'translate', 'describe', 'memorize', 'puzzle', 'rps', 'math'];
+export const MODES: BattleMode[] = ['type', 'translate', 'describe', 'memorize', 'puzzle', 'rps', 'math', 'potion', 'rune'];
 
 export const MODE_LABELS: Record<BattleMode, string> = {
   type: 'Speed Cast',
@@ -11,6 +12,8 @@ export const MODE_LABELS: Record<BattleMode, string> = {
   puzzle: 'Puzzle',
   rps: 'Rock Paper Scissors',
   math: 'Math Is Magic',
+  potion: 'Potion Mixing',
+  rune: 'Rune Reflex',
 };
 
 /** Puzzle mode: a 3 x 4 = 12-tile grid. */
@@ -148,4 +151,63 @@ export function mathQuestion(rand: Rand = Math.random): MathQuestion {
   const candidates = [...new Set(nearMisses)].filter((n) => n > 0 && n !== answer);
   const wrong = shuffle(candidates, rand).slice(0, CHOICE_COUNT - 1);
   return { a, b, options: shuffle([answer, ...wrong], rand) };
+}
+
+/** Potion Mixing: 6 ingredients (indices; their pictures live in PixelIcon). Level 1 is 3 ingredients, +1 per level. */
+export const POTION_INGREDIENTS = 6;
+export const POTION_START_LENGTH = 3;
+export const POTION_MAX_LEVEL = 10;
+/** Training passes once this many levels are brewed. */
+export const POTION_TRAINING_TARGET = 5;
+
+export const potionLength = (level: number) => POTION_START_LENGTH + level - 1;
+
+/** The round's whole sequence (each level shows a longer prefix). Never the same ingredient twice in a row. */
+export function potionSequence(length: number = potionLength(POTION_MAX_LEVEL), rand: Rand = Math.random): number[] {
+  const out: number[] = [];
+  while (out.length < length) {
+    const next = Math.floor(rand() * POTION_INGREDIENTS);
+    if (next !== out[out.length - 1]) out.push(next);
+  }
+  return out;
+}
+
+export interface PotionWizard { color: PlayerColor; best: number; out: boolean }
+
+/**
+ * Versus: the round is decided once nobody is still brewing, the last level was played, or one team is out
+ * while the other is already ahead on average (its average can only go up).
+ */
+export function potionDecided(wizards: PotionWizard[], level: number, maxLevel: number = POTION_MAX_LEVEL): boolean {
+  if (level >= maxLevel) return true;
+  const brewing = (c: PlayerColor) => wizards.some((w) => w.color === c && !w.out);
+  if (!TEAMS.some(brewing)) return true;
+  const avg = teamAverages(wizards, (w) => w.best);
+  return TEAMS.some((c) => !brewing(c) && brewing(otherTeam(c)) && avg[otherTeam(c)] > avg[c]);
+}
+
+/** Rune Reflex: 6 runes (indices; pictures in PixelIcon). Best of 5 flashes: the first side to catch 3 wins. */
+export const RUNE_COUNT = 6;
+export const RUNE_FLASHES = 5;
+export const RUNE_WINS_NEEDED = 3;
+
+/** The grid order for one flash: every rune once, shuffled (the same for every phone). */
+export const runeLayout = (rand: Rand = Math.random): number[] => shuffle(Array.from({ length: RUNE_COUNT }, (_, i) => i), rand);
+
+/** The rune to catch, never the same as the previous flash's. */
+export function randomRune(previous: number | null, rand: Rand = Math.random): number {
+  const options = Array.from({ length: RUNE_COUNT }, (_, i) => i).filter((r) => r !== previous);
+  return options[Math.floor(rand() * options.length)];
+}
+
+/**
+ * After a flash: the side that won the round, null for a draw (all flashes played, level), or undefined to keep going.
+ */
+export function runeRoundWinner(wins: Partial<Record<RpsSide, number>>, flashesPlayed: number): RpsSide | null | undefined {
+  const sides = Object.entries(wins) as Array<[RpsSide, number]>;
+  const leader = sides.find(([, n]) => n >= RUNE_WINS_NEEDED);
+  if (leader) return leader[0];
+  if (flashesPlayed < RUNE_FLASHES) return undefined;
+  const [a, b] = sides.sort((x, y) => y[1] - x[1]);
+  return !b || a[1] > b[1] ? a?.[0] ?? null : null;
 }

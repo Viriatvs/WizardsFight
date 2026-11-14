@@ -9,10 +9,12 @@ import {
   MODES, randomMode, buildChoices, maskSpell, scramblePuzzle, isSolved, PUZZLE, randomPuzzleImage,
   matchWords, lettersFound, spellWordCount, isRpsHand, randomRpsHand, rpsThrowWinner,
   mathQuestion, MATH_TRAINING_TARGET, majorityHand,
+  potionSequence, potionLength, potionDecided, POTION_MAX_LEVEL, POTION_TRAINING_TARGET,
+  runeLayout, randomRune, runeRoundWinner, RUNE_FLASHES, RUNE_WINS_NEEDED,
 } from './src/lib/modes';
 import { TEAMS, MAX_TEAM_SIZE, pickTeam, bothTeamsPresent, teamNames, teamSizes, teamAverages, higherTeam } from './src/lib/teams';
 import { gameScore, gameWinner, isGameOver } from './src/lib/game';
-import type { Room, Player, PlayerColor, SpellReveal, GameInfo, BattleEnd, RpsHand, RpsResult, RpsSide, MathNext } from './src/types/game';
+import type { Room, Player, PlayerColor, SpellReveal, GameInfo, BattleEnd, RpsHand, RpsResult, RpsSide, MathNext, PotionStatus, RuneResult } from './src/types/game';
 
 const dev = process.env.NODE_ENV !== 'production';
 const port = parseInt(process.env.PORT || '3000', 10);
@@ -32,6 +34,19 @@ const RPS_WINS_NEEDED = 2;
 const RPS_MAX_IDLE_THROWS = 3;
 const CPU = 'cpu';
 const MATH_LIMIT_MS = 10000;
+/** Potion Mixing: one ingredient shown every step; brewing time grows with the sequence; a pause between levels. */
+const POTION_STEP_MS = 800;
+const POTION_INPUT_BASE_MS = 3000;
+const POTION_INPUT_PER_INGREDIENT_MS = 900;
+const POTION_BETWEEN_MS = 1500;
+/** Rune Reflex: a random "get ready" wait (no anticipating), time to tap, and how long the result shows. */
+const RUNE_READY_MIN_MS = 1200;
+const RUNE_READY_MAX_MS = 3000;
+const RUNE_FLASH_MS = 2500;
+const RUNE_SHOW_MS = 1500;
+/** Training: the computer wizard's reaction time. */
+const RUNE_CPU_MIN_MS = 650;
+const RUNE_CPU_MAX_MS = 1100;
 const ROOM_ABANDONED_MS = 5 * 60 * 1000;
 const ROOM_SWEEP_INTERVAL_MS = 60 * 1000;
 
@@ -103,6 +118,7 @@ function endBattle(io: Server, room: Room, winner: Player | null, extra: Record<
     results[p.socketId] = { color: p.color, name: p.name, durationMs: sub?.durationMs ?? -1, correct: !!sub || p === winner };
     if (room.mode === 'memorize') results[p.socketId].letters = lettersFound(room.spell.latin, room.foundWords.get(p.socketId) ?? []);
     if (room.mode === 'math') results[p.socketId].rightAnswers = room.math.progress.get(p.socketId)?.right ?? 0;
+    if (room.mode === 'potion') results[p.socketId].potionLevel = room.potion.progress.get(p.socketId)?.best ?? 0;
   }
   const payload: BattleEnd = {
     winnerColor: winner?.color ?? null,
@@ -189,6 +205,8 @@ function checkRoundComplete(io: Server, room: Room) {
   if (room.mode === 'type' && room.submissions.size > 0 && everyone(room, room.submissions)) return endSpeedCast(io, room);
   if ((room.mode === 'translate' || room.mode === 'describe') && everyone(room, room.lockedOut)) return endBattle(io, room, null, { allWrong: true });
   if (room.mode === 'rps' && room.rps.open && everyone(room, room.rps.picks)) resolveRpsThrow(io, room);
+  if (room.mode === 'potion' && room.potion.open && potionLevelFinished(room)) closePotionLevel(io, room);
+  if (room.mode === 'rune' && room.rune.open && everyone(room, room.rune.out)) resolveRuneFlash(io, room, null, null);
 }
 
 const PRE_BATTLE_DELAY_MS = 2000;
@@ -335,6 +353,113 @@ function resolveRpsThrow(io: Server, room: Room) {
   });
 }
 
+const between = (min: number, max: number) => min + Math.floor(Math.random() * (max - min));
+
+function potionStatus(room: Room): PotionStatus {
+  const players: PotionStatus['players'] = {};
+  for (const p of room.players.values()) {
+    const prog = room.potion.progress.get(p.socketId);
+    if (prog) players[p.socketId] = { color: p.color, name: p.name, best: prog.best, done: prog.done, out: prog.out };
+  }
+  return { level: room.potion.level, players };
+}
+
+/** Every wizard still in the room finished this level or is out. */
+const potionLevelFinished = (room: Room) =>
+  Array.from(room.players.keys()).every((id) => {
+    const prog = room.potion.progress.get(id);
+    return !prog || prog.done || prog.out;
+  });
+
+/** Potion Mixing: shows the next, longer sequence to everyone, then opens brewing. */
+function startPotionLevel(io: Server, room: Room) {
+  const potion = room.potion;
+  potion.level++;
+  potion.open = false;
+  for (const prog of potion.progress.values()) { prog.pos = 0; prog.done = false; }
+  const sequence = potion.sequence.slice(0, potionLength(potion.level));
+  io.to(room.id).emit('potion:show', { level: potion.level, sequence, stepMs: POTION_STEP_MS });
+  io.to(room.id).emit('potion:status', potionStatus(room));
+  const level = potion.level;
+  laterInRound(room, sequence.length * POTION_STEP_MS + POTION_STEP_MS / 2, () => {
+    if (potion.level !== level) return;
+    potion.open = true;
+    const limitMs = POTION_INPUT_BASE_MS + sequence.length * POTION_INPUT_PER_INGREDIENT_MS;
+    io.to(room.id).emit('potion:input', { level, limitMs });
+    laterInRound(room, limitMs, () => { if (potion.level === level && potion.open) closePotionLevel(io, room); });
+  });
+}
+
+/** End of a brewing level: whoever hasn't finished is out. Then the next level, or the round result. */
+function closePotionLevel(io: Server, room: Room) {
+  const potion = room.potion;
+  if (!potion.open) return;
+  potion.open = false;
+  for (const prog of potion.progress.values()) if (!prog.done) prog.out = true;
+  io.to(room.id).emit('potion:status', potionStatus(room));
+  laterInRound(room, POTION_BETWEEN_MS, () => {
+    const players = Array.from(room.players.values());
+    const best = (p: Player) => potion.progress.get(p.socketId)?.best ?? 0;
+    const out = (p: Player) => potion.progress.get(p.socketId)?.out ?? true;
+    const winTimeMs = Date.now() - room.spellRevealedAt!;
+    if (room.solo) {
+      const [player] = players;
+      if (player && best(player) >= POTION_TRAINING_TARGET) {
+        recordWinTime(room, player, winTimeMs);
+        return endBattle(io, room, player);
+      }
+      if (!player || out(player)) return endBattle(io, room, null, { timedOut: true });
+      return startPotionLevel(io, room);
+    }
+    const wizards = players.map((p) => ({ color: p.color, best: best(p), out: out(p) }));
+    if (potionDecided(wizards, potion.level)) return endOnTeamAverage(io, room, best, {}, winTimeMs);
+    startPotionLevel(io, room);
+  });
+}
+
+/** Rune Reflex: a random wait ("get ready"), then the target rune and a freshly shuffled grid for every phone. */
+function startRuneFlash(io: Server, room: Room) {
+  const rune = room.rune;
+  rune.flash++;
+  rune.open = false;
+  rune.out.clear();
+  const flash = rune.flash;
+  io.to(room.id).emit('rune:ready', { flash });
+  laterInRound(room, between(RUNE_READY_MIN_MS, RUNE_READY_MAX_MS), () => {
+    if (rune.flash !== flash) return;
+    rune.target = randomRune(flash > 1 ? rune.target : null);
+    rune.layout = runeLayout();
+    rune.open = true;
+    io.to(room.id).emit('rune:flash', { flash, target: rune.target, layout: rune.layout, limitMs: RUNE_FLASH_MS });
+    if (room.solo) laterInRound(room, between(RUNE_CPU_MIN_MS, RUNE_CPU_MAX_MS), () => { if (rune.flash === flash && rune.open) resolveRuneFlash(io, room, CPU, null); });
+    laterInRound(room, RUNE_FLASH_MS, () => { if (rune.flash === flash && rune.open) resolveRuneFlash(io, room, null, null); });
+  });
+}
+
+/**
+ * A flash is caught (`side` = the catcher's team, or the computer wizard) or missed (null). Shows the result,
+ * then the next flash or the round result. ponytail: the first tap to reach the server wins, so a slow network costs a bit.
+ */
+function resolveRuneFlash(io: Server, room: Room, side: RpsSide | null, by: Player | null) {
+  const rune = room.rune;
+  if (!rune.open) return;
+  rune.open = false;
+  if (side) rune.wins.set(side, (rune.wins.get(side) ?? 0) + 1);
+  const players = Array.from(room.players.values());
+  const sides: RpsSide[] = room.solo ? [...players.map((p) => p.color), CPU] : TEAMS;
+  const wins = Object.fromEntries(sides.map((s) => [s, rune.wins.get(s) ?? 0]));
+  const result: RuneResult = { flash: rune.flash, target: rune.target, winner: side, by: by?.name ?? (side === CPU ? 'Computer wizard' : null), wins };
+  io.to(room.id).emit('rune:result', result);
+  const roundWinner = runeRoundWinner(wins, rune.flash);
+  laterInRound(room, RUNE_SHOW_MS, () => {
+    if (roundWinner === undefined) return startRuneFlash(io, room);
+    const player = roundWinner && roundWinner !== CPU ? players.find((p) => p.color === roundWinner) ?? null : null;
+    if (!player) return endBattle(io, room, null, { timedOut: true });
+    recordWinTime(room, player, Date.now() - room.spellRevealedAt!);
+    endBattle(io, room, player, room.solo ? {} : { teamWin: true });
+  });
+}
+
 function revealSpell(io: Server, room: Room) {
   const spell = room.spell;
   const revealedAt = room.spellRevealedAt!;
@@ -366,6 +491,19 @@ function revealSpell(io: Server, room: Room) {
       room.math = { questions: [question], progress: new Map() };
       emit({ mode: 'math', question, revealedAt, limitMs: MATH_LIMIT_MS });
       laterInRound(room, MATH_LIMIT_MS, () => endMathOnAnswers(io, room));
+      return;
+    }
+    case 'potion': {
+      const progress = new Map(Array.from(room.players.keys()).map((id) => [id, { pos: 0, best: 0, done: false, out: false }]));
+      room.potion = { sequence: potionSequence(), level: 0, open: false, progress };
+      emit({ mode: 'potion', maxLevel: POTION_MAX_LEVEL, revealedAt });
+      startPotionLevel(io, room);
+      return;
+    }
+    case 'rune': {
+      room.rune = { flash: 0, target: 0, layout: [], open: false, out: new Set(), wins: new Map() };
+      emit({ mode: 'rune', winsNeeded: RUNE_WINS_NEEDED, flashes: RUNE_FLASHES, revealedAt });
+      startRuneFlash(io, room);
       return;
     }
     case 'rps': {
@@ -594,6 +732,35 @@ app.prepare().then(() => {
         if (!questions[me.index]) questions.push(mathQuestion());
         const next: MathNext = { question: questions[me.index], right: me.right, lastCorrect };
         io.to(socket.id).emit('math:next', next);
+        return;
+      }
+
+      // Potion Mixing: text is "<level>:<ingredient>", one tap at a time. A wrong ingredient puts you out.
+      if (room.mode === 'potion') {
+        const potion = room.potion;
+        const me = potion.progress.get(socket.id);
+        const [level, ingredient] = String(payload.text).split(':').map(Number);
+        if (!potion.open || level !== potion.level || !me || me.done || me.out) return;
+        if (ingredient === potion.sequence[me.pos]) {
+          me.pos++;
+          if (me.pos === potionLength(level)) { me.done = true; me.best = level; }
+        } else {
+          me.out = true;
+        }
+        io.to(room.id).emit('potion:status', potionStatus(room));
+        if (potionLevelFinished(room)) closePotionLevel(io, room);
+        return;
+      }
+
+      // Rune Reflex: text is "<flash>:<rune>". The first right tap catches the flash for the team; a wrong tap is out for this flash.
+      if (room.mode === 'rune') {
+        const rune = room.rune;
+        const [flash, tapped] = String(payload.text).split(':').map(Number);
+        if (!rune.open || flash !== rune.flash || rune.out.has(socket.id)) return;
+        if (tapped === rune.target) return resolveRuneFlash(io, room, player.color, player);
+        rune.out.add(socket.id);
+        io.to(socket.id).emit('rune:wrong', { flash });
+        if (everyone(room, rune.out)) resolveRuneFlash(io, room, null, null);
         return;
       }
 

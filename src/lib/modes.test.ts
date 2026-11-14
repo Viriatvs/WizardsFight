@@ -5,6 +5,8 @@ import {
   PUZZLE_IMAGES, randomPuzzleImage,
   matchWords, lettersFound, spellWordCount, fillWords, rpsThrowWinner, isRpsHand, randomRpsHand,
   mathQuestion, MATH_FACTOR,
+  potionSequence, potionLength, potionDecided, POTION_INGREDIENTS, POTION_MAX_LEVEL,
+  runeLayout, randomRune, runeRoundWinner, RUNE_COUNT,
 } from './modes';
 import type { BattleMode, SpellData } from '@/types/game';
 
@@ -134,4 +136,40 @@ test('mathQuestion: factors in range, 4 different positive options including the
     assert.ok(options.includes(a * b));
     for (const o of options) assert.ok(o > 0);
   }
+});
+
+test('potion: sequence long enough for the last level, valid ingredients, never the same twice in a row', () => {
+  for (let run = 0; run < 50; run++) {
+    const seq = potionSequence();
+    assert.equal(seq.length, potionLength(POTION_MAX_LEVEL));
+    seq.forEach((n, i) => {
+      assert.ok(n >= 0 && n < POTION_INGREDIENTS);
+      if (i) assert.notEqual(n, seq[i - 1]);
+    });
+  }
+  assert.equal(potionLength(1), 3);
+});
+
+test('potion: decided when nobody brews, at the last level, or when a team is out and already behind', () => {
+  const w = (color: 'blue' | 'red', best: number, out: boolean) => ({ color, best, out });
+  assert.equal(potionDecided([w('blue', 2, false), w('red', 2, false)], 3), false);
+  assert.equal(potionDecided([w('blue', 2, true), w('red', 2, true)], 3), true); // nobody left
+  assert.equal(potionDecided([w('blue', 2, true), w('red', 3, false)], 4), true); // red out of reach
+  assert.equal(potionDecided([w('blue', 2, true), w('red', 2, false)], 3), false); // red must still beat 2
+  assert.equal(potionDecided([w('blue', 9, false), w('red', 9, false)], POTION_MAX_LEVEL), true);
+  // Teams: blue averages (4 + 1) / 2 = 2.5, both out; red still brewing at 2 → keep going.
+  assert.equal(potionDecided([w('blue', 4, true), w('blue', 1, true), w('red', 2, false)], 3), false);
+});
+
+test('rune: layout has every rune once; target never repeats; first to 3 wins, else best after 5', () => {
+  for (let run = 0; run < 30; run++) {
+    assert.deepEqual([...runeLayout()].sort(), Array.from({ length: RUNE_COUNT }, (_, i) => i));
+    const prev = run % RUNE_COUNT;
+    assert.notEqual(randomRune(prev), prev);
+  }
+  assert.equal(runeRoundWinner({ blue: 3, red: 1 }, 4), 'blue');
+  assert.equal(runeRoundWinner({ blue: 2, red: 1 }, 3), undefined);
+  assert.equal(runeRoundWinner({ blue: 2, red: 1 }, 5), 'blue'); // a flash nobody caught
+  assert.equal(runeRoundWinner({ blue: 2, red: 2 }, 5), null);
+  assert.equal(runeRoundWinner({ blue: 0, cpu: 3 }, 3), 'cpu');
 });

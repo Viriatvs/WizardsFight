@@ -1,5 +1,5 @@
 // Game rules: a game is a series of rounds. Pure and shared by server and client.
-import { MATH_TRAINING_TARGET } from './modes';
+import { MATH_TRAINING_TARGET, POTION_TRAINING_TARGET } from './modes';
 import { teamAverages, formatAverage } from './teams';
 import type { PlayerColor, RoundResults, GameScore, BattleEnd } from '@/types/game';
 
@@ -56,13 +56,20 @@ export function drawReason(end: Pick<BattleEnd, 'allWrong' | 'mode' | 'results'>
     if (end.mode === 'memorize') return 'Spell not completed in time';
     if (end.mode === 'rps') return 'The computer wizard won';
     if (end.mode === 'math') return `Fewer than ${MATH_TRAINING_TARGET} right answers`;
+    if (end.mode === 'potion') return `Fewer than ${POTION_TRAINING_TARGET} potions brewed`;
+    if (end.mode === 'rune') return 'The computer wizard was faster';
     return 'Time ran out';
   }
   if (end.allWrong) return 'Every wizard chose wrong';
   if (end.mode === 'puzzle') return 'Nobody finished the puzzle in time';
   if (end.mode === 'rps') return 'Nobody picked in time';
+  if (end.mode === 'rune') return 'Same number of runes caught';
   const results = Object.values(end.results);
   if (end.mode === 'math') return `Same number of right answers (${formatAverage(teamAverages(results, (r) => r.rightAnswers ?? 0).blue)})`;
+  if (end.mode === 'potion') {
+    const level = teamAverages(results, (r) => r.potionLevel ?? 0).blue;
+    return level > 0 ? `Same potion level (${formatAverage(level)})` : 'Nobody brewed a potion';
+  }
   if (end.mode === 'memorize') {
     const letters = teamAverages(results, (r) => r.letters ?? 0).blue;
     return letters > 0 ? `Same number of correct letters (${formatAverage(letters)})` : 'Nobody remembered a word';
@@ -83,6 +90,10 @@ export function winDetail(end: Pick<BattleEnd, 'onLetters' | 'winnerColor' | 're
   if (end.mode === 'math') {
     const solo = results.every((r) => r.color === end.winnerColor);
     return solo ? `${results[0]?.rightAnswers ?? 0} right answers` : `Right answers: ${versus((r) => r.rightAnswers ?? 0)}`;
+  }
+  if (end.mode === 'potion') {
+    const solo = results.every((r) => r.color === end.winnerColor);
+    return solo ? `${results[0]?.potionLevel ?? 0} potions brewed` : `Potion levels: ${versus((r) => r.potionLevel ?? 0)}`;
   }
   if (!end.onLetters) return null;
   return `Won on letters: ${versus((r) => r.letters ?? 0)}`;

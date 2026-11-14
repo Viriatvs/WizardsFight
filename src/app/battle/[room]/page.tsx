@@ -12,9 +12,11 @@ import CopyLinkButton from '@/components/CopyLinkButton';
 import { MODE_LABELS } from '@/lib/modes';
 import { roundLabel, drawReason, winDetail } from '@/lib/game';
 import { TEAMS, MAX_TEAM_SIZE, bothTeamsPresent, teamNames } from '@/lib/teams';
-import type { PlayerColor, BattleMode, BattleEnd, GameInfo, GameScore } from '@/types/game';
+import type { PlayerColor, BattleMode, BattleEnd, GameInfo, GameScore, PotionShow, PotionInput, PotionStatus, RuneFlash, RuneResult } from '@/types/game';
 import PixelIcon from '@/components/PixelIcon';
 import BattleMusic from '@/components/BattleMusic';
+import { PotionStage, type PotionLevel } from '@/components/Potion';
+import { RuneStage, type RuneFlashState } from '@/components/Rune';
 
 /** Where to send visitors of a room that no longer exists. The start page shows a notice for it. */
 const ROOM_EXPIRED_URL = '/?expired=1';
@@ -52,6 +54,9 @@ export default function BattlePage({ params }: { params: Promise<{ room: string 
   const [error, setError] = useState<string | null>(null);
   const [connected, setConnected] = useState(false);
   const [battleStarted, setBattleStarted] = useState(false);
+  /** Potion Mixing / Rune Reflex: shown big instead of the battle picture while those rounds play. */
+  const [potion, setPotion] = useState<PotionLevel | null>(null);
+  const [rune, setRune] = useState<RuneFlashState | null>(null);
   // Read after the first render: the server has no window, and the first browser render must match its HTML.
   const [origin, setOrigin] = useState('');
   useEffect(() => setOrigin(window.location.origin), []);
@@ -82,6 +87,8 @@ export default function BattlePage({ params }: { params: Promise<{ room: string 
         setBattleStarted(false);
         setLastGame(null);
         setFinalEnd(null);
+        setPotion(null);
+        setRune(null);
       }
       // Game cancelled (a player left mid-game): back to the plain waiting room.
       if (data.state === 'waiting' && data.game.results.length === 0) setBattleEnd(null);
@@ -114,6 +121,17 @@ export default function BattlePage({ params }: { params: Promise<{ room: string 
         setBattleStarted(false);
       }, ANIMATION_MS);
     });
+    // Potion Mixing: each level shows a sequence, then brewing opens; status = every wizard's progress.
+    socket.on('potion:show', (data: PotionShow) => setPotion((p) => ({ show: data, shownAt: Date.now(), deadline: null, status: p?.status ?? null })));
+    socket.on('potion:input', (data: PotionInput) => setPotion((p) => (p && p.show.level === data.level ? { ...p, deadline: Date.now() + data.limitMs } : p)));
+    socket.on('potion:status', (data: PotionStatus) => setPotion((p) => p && { ...p, status: data }));
+
+    // Rune Reflex: get ready, the rune flashes, someone catches it (or nobody).
+    socket.on('rune:ready', (data: { flash: number }) => setRune((r) => ({ flash: data.flash, target: null, layout: [], deadline: null, wrong: false, result: null, wins: r?.wins ?? {} })));
+    socket.on('rune:flash', (data: RuneFlash) => setRune((r) => r && { ...r, flash: data.flash, target: data.target, layout: data.layout, deadline: Date.now() + data.limitMs }));
+    socket.on('rune:wrong', () => setRune((r) => r && { ...r, wrong: true }));
+    socket.on('rune:result', (data: RuneResult) => setRune((r) => r && { ...r, result: data, wins: data.wins }));
+
     socket.on('player:disconnected', (data: { color: string; name: string }) => {
       setError(`${data.name} left the room`);
       setTimeout(() => setError(null), 3000);
@@ -255,12 +273,18 @@ export default function BattlePage({ params }: { params: Promise<{ room: string 
         )}
 
         <div className="mb-8">
+          {room?.state === 'playing' && room.mode === 'potion' && potion ? (
+            <PotionStage level={potion} />
+          ) : room?.state === 'playing' && room.mode === 'rune' && rune ? (
+            <RuneStage state={rune} />
+          ) : (
           <BattleImage
             blueNames={members('blue').map((p) => p.name)}
             redNames={members('red').map((p) => p.name)}
             countdown={countdown}
             battleStarted={battleStarted}
           />
+          )}
         </div>
 
         <div className="flex flex-col lg:flex-row gap-8 items-center lg:items-start justify-center">

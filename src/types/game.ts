@@ -1,8 +1,8 @@
 export type RoomState = 'waiting' | 'countdown' | 'playing' | 'ended';
 export type PlayerColor = 'blue' | 'red';
-export type BattleMode = 'type' | 'translate' | 'describe' | 'memorize' | 'puzzle' | 'rps' | 'math';
+export type BattleMode = 'type' | 'translate' | 'describe' | 'memorize' | 'puzzle' | 'rps' | 'math' | 'potion' | 'rune';
 export type RpsHand = 'rock' | 'paper' | 'scissors';
-/** Rock Paper Scissors side: a player's color, or the computer wizard in training. */
+/** Rock Paper Scissors / Rune Reflex side: a player's color, or the computer wizard in training. */
 export type RpsSide = PlayerColor | 'cpu';
 
 /** One entry per finished round of the current game: the winner's color, or null for a draw. */
@@ -36,7 +36,7 @@ export interface BattleEnd {
   winnerName: string | null;
   durationMs: number | null;
   /** Per player (keyed by socket id). Also the source of both names for the score table. */
-  results: Record<string, { color: PlayerColor; name: string; durationMs: number; correct: boolean; letters?: number; rightAnswers?: number }>;
+  results: Record<string, { color: PlayerColor; name: string; durationMs: number; correct: boolean; letters?: number; rightAnswers?: number; potionLevel?: number }>;
   game: GameInfo;
   /** Memorize: nobody completed the spell, the winner had more correct letters (see results[].letters). */
   onLetters?: boolean;
@@ -66,7 +66,11 @@ export type SpellReveal =
   /** Throws follow as rps:throw / rps:result events. */
   | { mode: 'rps'; winsNeeded: number; revealedAt: number }
   /** The player's first question; the next ones arrive as math:next. */
-  | { mode: 'math'; question: MathQuestion; revealedAt: number; limitMs: number };
+  | { mode: 'math'; question: MathQuestion; revealedAt: number; limitMs: number }
+  /** Levels follow as potion:show / potion:input / potion:status events. */
+  | { mode: 'potion'; maxLevel: number; revealedAt: number }
+  /** Flashes follow as rune:ready / rune:flash / rune:result events. */
+  | { mode: 'rune'; winsNeeded: number; flashes: number; revealedAt: number };
 
 /** MathIsMagic question: a × b, with the product among the options. The answer itself is never sent. */
 export interface MathQuestion { a: number; b: number; options: number[] }
@@ -84,6 +88,18 @@ export interface RpsResult {
   winner: RpsSide | null;
   wins: Partial<Record<RpsSide, number>>;
 }
+
+/** potion:show: the ingredients to repeat this level (indices into the ingredient list), one every stepMs. */
+export interface PotionShow { level: number; sequence: number[]; stepMs: number }
+/** potion:input: brewing is open for limitMs. */
+export interface PotionInput { level: number; limitMs: number }
+/** potion:status: every wizard's state. best = levels completed; done = finished this level; out = wrong tap or too slow. */
+export interface PotionStatus { level: number; players: Record<string, { color: PlayerColor; name: string; best: number; done: boolean; out: boolean }> }
+
+/** rune:flash: tap `target` on the grid, laid out as `layout` (rune indices), within limitMs. */
+export interface RuneFlash { flash: number; target: number; layout: number[]; limitMs: number }
+/** rune:result: who caught the flash (null = nobody), by which wizard, and the flashes won so far. */
+export interface RuneResult { flash: number; target: number; winner: RpsSide | null; by: string | null; wins: Partial<Record<RpsSide, number>> }
 
 export interface Player {
   socketId: string;
@@ -134,6 +150,10 @@ export interface Room {
   rps: { throw: number; open: boolean; picks: Map<string, RpsHand>; wins: Map<string, number>; idleThrows: number };
   /** MathIsMagic: the round's shared question list and each player's position in it and right answers (socketId →). */
   math: { questions: MathQuestion[]; progress: Map<string, { index: number; right: number }> };
+  /** Potion Mixing: the shared ingredient sequence, the current level, whether taps count, and each wizard's progress. */
+  potion: { sequence: number[]; level: number; open: boolean; progress: Map<string, { pos: number; best: number; done: boolean; out: boolean }> };
+  /** Rune Reflex: the current flash (target + grid), whether taps count, who tapped wrong this flash, flashes won per side. */
+  rune: { flash: number; target: number; layout: number[]; open: boolean; out: Set<string>; wins: Map<string, number> };
   /** Last puzzle picture used in this room, so the next Puzzle round shows a different one. */
   puzzleImage: string | null;
 }

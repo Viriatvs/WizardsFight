@@ -28,6 +28,8 @@ export function createRoom(hostSocketId: string): Room {
     solo: false,
     puzzleImage: null,
     rps: { throw: 0, open: false, picks: new Map(), wins: new Map(), idleThrows: 0 },
+    potion: { sequence: [], level: 0, open: false, progress: new Map() },
+    rune: { flash: 0, target: 0, layout: [], open: false, out: new Set(), wins: new Map() },
     foundWords: new Map(),
   };
   rooms.set(id, room);

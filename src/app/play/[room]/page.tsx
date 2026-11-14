@@ -10,10 +10,12 @@ import PhoneResult from '@/components/PhoneResult';
 import PuzzleInput from '@/components/PuzzleInput';
 import RpsInput from '@/components/RpsInput';
 import MathInput from '@/components/MathInput';
+import { PotionInput as PotionPad, type PotionLevel } from '@/components/Potion';
+import { RuneInput, type RuneFlashState } from '@/components/Rune';
 import { MODE_LABELS, fillWords } from '@/lib/modes';
 import { roundLabel } from '@/lib/game';
 import { TEAMS, MAX_TEAM_SIZE, bothTeamsPresent, otherTeam, teamSizes } from '@/lib/teams';
-import type { PlayerColor, GamePhase, BattleMode, SpellReveal, GameInfo, BattleEnd, RpsThrow, RpsResult, MathQuestion, MathNext } from '@/types/game';
+import type { PlayerColor, GamePhase, BattleMode, SpellReveal, GameInfo, BattleEnd, RpsThrow, RpsResult, MathQuestion, MathNext, PotionShow, PotionInput, PotionStatus, RuneFlash, RuneResult } from '@/types/game';
 import PixelIcon, { WIZARD_ICON } from '@/components/PixelIcon';
 
 /** Where to send visitors of a room that no longer exists. The start page shows a notice for it. */
@@ -95,6 +97,8 @@ export default function PlayPage({ params }: { params: Promise<{ room: string }>
   const [rpsThrow, setRpsThrow] = useState<{ throw: number; deadline: number } | null>(null);
   const [rpsResult, setRpsResult] = useState<RpsResult | null>(null);
   const [math, setMath] = useState<{ question: MathQuestion; index: number; right: number; lastCorrect: boolean | null } | null>(null);
+  const [potion, setPotion] = useState<PotionLevel | null>(null);
+  const [rune, setRune] = useState<RuneFlashState | null>(null);
   const [submitted, setSubmitted] = useState<{ correct: boolean; durationMs: number } | null>(null);
   const [graceSeconds, setGraceSeconds] = useState<number | null>(null);
   const graceTimerRef = useRef<ReturnType<typeof setInterval>>();
@@ -134,6 +138,8 @@ export default function PlayPage({ params }: { params: Promise<{ room: string }>
         setRpsThrow(null);
         setRpsResult(null);
         setMath(null);
+        setPotion(null);
+        setRune(null);
         setGraceSeconds(null);
         setBattleEnd(null);
         clearTimeout(answerTimerRef.current);
@@ -170,6 +176,8 @@ export default function PlayPage({ params }: { params: Promise<{ room: string }>
       setRpsThrow(null);
       setRpsResult(null);
       setMath(data.mode === 'math' ? { question: data.question, index: 0, right: 0, lastCorrect: null } : null);
+      setPotion(null);
+      setRune(null);
       setDeadline('limitMs' in data ? Date.now() + data.limitMs : null);
       setPhase('spell');
     });
@@ -188,6 +196,17 @@ export default function PlayPage({ params }: { params: Promise<{ room: string }>
     socket.on('math:next', (data: MathNext) => {
       setMath((m) => m && { question: data.question, index: m.index + 1, right: data.right, lastCorrect: data.lastCorrect });
     });
+
+    // Potion Mixing: each level shows a sequence, then brewing opens; status = every wizard's progress.
+    socket.on('potion:show', (data: PotionShow) => setPotion((p) => ({ show: data, shownAt: Date.now(), deadline: null, status: p?.status ?? null })));
+    socket.on('potion:input', (data: PotionInput) => setPotion((p) => (p && p.show.level === data.level ? { ...p, deadline: Date.now() + data.limitMs } : p)));
+    socket.on('potion:status', (data: PotionStatus) => setPotion((p) => p && { ...p, status: data }));
+
+    // Rune Reflex: get ready, the rune flashes, someone catches it (or nobody).
+    socket.on('rune:ready', (data: { flash: number }) => setRune((r) => ({ flash: data.flash, target: null, layout: [], deadline: null, wrong: false, result: null, wins: r?.wins ?? {} })));
+    socket.on('rune:flash', (data: RuneFlash) => setRune((r) => r && { ...r, flash: data.flash, target: data.target, layout: data.layout, deadline: Date.now() + data.limitMs }));
+    socket.on('rune:wrong', () => setRune((r) => r && { ...r, wrong: true }));
+    socket.on('rune:result', (data: RuneResult) => setRune((r) => r && { ...r, result: data, wins: data.wins }));
 
     // Memorize: some typed words were right; only this player sees them.
     socket.on('spell:progress', (data: WordProgress) => setWordProgress(data));
@@ -472,6 +491,14 @@ export default function PlayPage({ params }: { params: Promise<{ room: string }>
             deadline={deadline}
             onPick={(index, option) => submitSpell(`${index}:${option}`)}
           />
+        )}
+
+        {phase === 'spell' && reveal?.mode === 'potion' && potion && (
+          <PotionPad key={potion.show.level} level={potion} mySocketId={mySocketId} onTap={(level, ingredient) => submitSpell(`${level}:${ingredient}`)} />
+        )}
+
+        {phase === 'spell' && reveal?.mode === 'rune' && rune && (
+          <RuneInput state={rune} myColor={color} winsNeeded={reveal.winsNeeded} onTap={(flash, r) => submitSpell(`${flash}:${r}`)} />
         )}
 
         {phase === 'spell' && reveal?.mode === 'rps' && (
